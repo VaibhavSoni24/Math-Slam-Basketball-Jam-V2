@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Math Slam: Basketball Jam — Solve math problems faster than your opponent to earn basketball shots! An educational arcade game for grades 3–6." />
+  <title>Math Slam: Basketball Jam</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;600;700;800&family=DM+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+
+  <!-- KaTeX for math rendering -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous" />
+
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- Phaser 4.1.0 — loaded as global script (webpack bundle) -->
+  <script src="/node_modules/phaser/dist/phaser.js"></script>
+</head>
+<body>
+  <!-- Phaser Game Canvas Container -->
+  <div id="game-container">
+    <!-- Canvas is injected by Phaser here -->
+  </div>
+
+  <!-- DOM HUD Overlay (managed by HudScene) -->
+  <div id="hud-overlay" class="hud-hidden"></div>
+
+  <!-- Game entry point - uses Phaser global from script tag above -->
+  <script type="module" src="main.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "math-slam-basketball-jam",
+  "version": "2.0.0",
+  "description": "Math Slam: Basketball Jam — Educational arcade game for grades 3-6",
+  "type": "module",
+  "scripts": {
+    "dev": "npx serve . -p 8080 --cors",
+    "start": "npx serve . -p 8080 --cors",
+    "serve": "python -m http.server 8080"
+  },
+  "dependencies": {
+    "phaser": "^4.1.0"
+  },
+  "devDependencies": {
+    "serve": "^14.2.6"
+  }
+}
