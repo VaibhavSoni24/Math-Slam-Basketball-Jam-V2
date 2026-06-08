@@ -6,6 +6,9 @@ This document serves as the primary Workflow Documentation tracking how this gam
 
 ---
 
+## 🎮 Play Now
+**[Live Game →](https://vaibhavsoni24.github.io/Math-Slam-Basketball-Jam-V2/)**
+
 ## 🚀 AI-Assisted Development Workflow
 
 Building this game required a highly parallelized workflow leveraging multiple AI models and specialized tools across different phases of the project. Here is the exact breakdown of the development process.
