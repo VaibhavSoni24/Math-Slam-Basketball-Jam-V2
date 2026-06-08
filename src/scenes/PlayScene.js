@@ -55,7 +55,8 @@ export class PlayScene extends Phaser.Scene {
     this.currentProblem   = null;
     this.problemIndex     = 0;
     this.totalProblems    = this.gameMode === 'flat' ? 10 : Phaser.Math.Between(9, 12);
-    this.problemTimeLimit = this.gameMode === 'flat' ? 999 : 10;
+    // Practice: 20s per round. Solo/2P: 10s.
+    this.problemTimeLimit = this.gameMode === 'flat' ? 20 : 10;
     this.shotTimeLimit    = 10;
 
     // Player state — wrong-answer counter
@@ -123,22 +124,22 @@ export class PlayScene extends Phaser.Scene {
     const p1Key = this.textures.exists('p1_idle') ? 'p1_idle' : null;
     const p2Key = this.textures.exists('p2_idle') ? 'p2_idle' : null;
 
-    // P1 — faces right (flip horizontally so player looks toward center/hoop)
+    // P1 — original asset already faces right (toward right hoop)
+    // Do NOT flipX — default orientation is correct
     if (p1Key) {
       this.playerP1 = this.add.image(P1_X, PLAYER_Y, p1Key)
         .setDisplaySize(PLAYER_W, PLAYER_H)
-        .setDepth(8).setOrigin(0.5, 1)
-        .setFlipX(true);  // face right toward hoop
+        .setDepth(8).setOrigin(0.5, 1);
     } else {
       this.playerP1 = this._drawFallback(P1_X, PLAYER_Y, 0xE85D04, 'P1');
     }
 
-    // P2 — original orientation (already faces left toward center)
+    // P2 — original asset already faces left (toward left hoop)
+    // Do NOT flipX — default orientation is correct
     if (p2Key) {
       this.playerP2 = this.add.image(P2_X, PLAYER_Y, p2Key)
         .setDisplaySize(PLAYER_W, PLAYER_H)
         .setDepth(8).setOrigin(0.5, 1);
-      // No flipX — original asset faces left toward center
     } else {
       this.playerP2 = this._drawFallback(P2_X, PLAYER_Y, 0x1A6FBF, 'P2');
     }
@@ -209,13 +210,16 @@ export class PlayScene extends Phaser.Scene {
 
   _setupInput() {
     this.input.keyboard.on('keydown-SPACE', () => {
-      if (this.state === STATE.SHOT && this.whoHasPossession === 'p1') {
-        this._releaseShotP1();
+      if (this.state === STATE.SHOT) {
+        // SPACE triggers shot for whoever has possession
+        if (this.whoHasPossession === 'p1') this._releaseShotP1();
+        else if (this.whoHasPossession === 'p2' && this.gameMode === 'local2p') this._releaseShotP2();
       }
     });
     this.input.keyboard.on('keydown-ENTER', () => {
-      if (this.state === STATE.SHOT && this.whoHasPossession === 'p1') {
-        this._releaseShotP1();
+      if (this.state === STATE.SHOT) {
+        if (this.whoHasPossession === 'p1') this._releaseShotP1();
+        else if (this.whoHasPossession === 'p2' && this.gameMode === 'local2p') this._releaseShotP2();
       }
     });
   }
@@ -290,7 +294,7 @@ export class PlayScene extends Phaser.Scene {
         if (!this.p2Answered && this.state === STATE.PROBLEM) {
           this._onCPUAnswered(isCorrect, timedOut);
         }
-      });
+      }, this.gameMode);   // pass mode so practice gets 5s flat delay
     }
 
     // PROBLEM TIMER — never stops due to wrong answers
@@ -439,8 +443,10 @@ export class PlayScene extends Phaser.Scene {
       this.events.emit('p2-verdict', { correct: true, score: this.p2.score, streak: this.p2.streak, delta: verdict.score_delta });
       this.events.emit('p1-status', 'P2 was faster!');
       this._showPossession('p2', 'P2 GOT IT! 🏀');
-      this._flashScreen('#4DA6FF', 0.15);
-      this._playCPUShotSequence();
+      this._flashScreen('#4DA6FF');
+
+      // In 2P mode: P2 gets a REAL shot phase (press ENTER to throw)
+      this._startShotPhase('p2');
     } else {
       this.p2.wrongCount++;
       window.gameAudio?.playWrong?.();
@@ -559,6 +565,7 @@ export class PlayScene extends Phaser.Scene {
 
   _releaseShotP1() {
     if (!this.shotMechanic.isActive) return;
+    if (this.whoHasPossession !== 'p1') return;
     this._stopShotTimer();
 
     const result = this.shotMechanic.release();
@@ -580,6 +587,32 @@ export class PlayScene extends Phaser.Scene {
     }
 
     this._executeShotResult('p1', result);
+  }
+
+  _releaseShotP2() {
+    if (!this.shotMechanic.isActive) return;
+    if (this.whoHasPossession !== 'p2') return;
+    this._stopShotTimer();
+
+    const result = this.shotMechanic.release();
+
+    // Show ball at P2's throw position
+    const pos = BALL_P2;
+    this.ball.x = pos.x;
+    this.ball.y = pos.y;
+    this.ball.angle = 0;
+    this.ball.setAlpha(1);
+
+    if (this.ball.play && this.anims.exists('ball_spin_anim')) {
+      this.ball.play('ball_spin_anim');
+    }
+
+    if (this.ballShadow) {
+      this.ballShadow.setPosition(pos.x, PLAYER_Y - 20);
+      this.ballShadow.setAlpha(0.5);
+    }
+
+    this._executeShotResult('p2', result);
   }
 
   _executeShotResult(shooter, result) {

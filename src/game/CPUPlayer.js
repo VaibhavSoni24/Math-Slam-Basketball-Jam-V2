@@ -82,10 +82,19 @@ export class CPUPlayer {
    * @param problem      — the current problem object
    * @param timeLimit    — seconds available
    * @param onAnswer     — callback(isCorrect, timeTaken, timedOut)
+   * @param mode         — game mode ('flat' = practice: 5s delay, always correct)
    */
-  scheduleProblem(problem, timeLimit, onAnswer) {
+  scheduleProblem(problem, timeLimit, onAnswer, mode) {
     this._clearTimeout();
     this._currentProblem = problem;
+
+    // Practice mode: CPU gives player 5s to try, then steps in correctly
+    if (mode === 'flat') {
+      this._answerTimeout = setTimeout(() => {
+        onAnswer(true, 5, false);
+      }, 5000);
+      return;
+    }
 
     // Calculate a realistic "thinking time" based on problem type
     const thinkingTime = this._calcThinkingTime(problem, timeLimit);
