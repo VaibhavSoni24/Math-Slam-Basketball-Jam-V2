@@ -216,9 +216,7 @@ export class HudScene extends Phaser.Scene {
     const exitBtn = document.getElementById('exit-game-btn');
     if (exitBtn) {
       exitBtn.addEventListener('click', () => {
-        if (confirm('Are you sure you want to quit the match?')) {
-          this._goToMenu();
-        }
+        this._goToMenu();
       });
     }
 
