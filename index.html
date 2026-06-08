@@ -3,32 +3,39 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Math Slam: Basketball Jam — Solve math problems faster than your opponent to earn basketball shots! An educational arcade game for grades 3–6." />
-  <title>Math Slam: Basketball Jam</title>
+  <meta name="description" content="Math Slam: Basketball Jam — Solve math problems, earn shots, win the court! Educational arcade game for grades 2–6." />
+  <title>Math Slam: Basketball Jam 🏀</title>
 
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;600;700;800&family=DM+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@700;800;900&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
 
-  <!-- KaTeX for math rendering -->
+  <!-- KaTeX for fraction rendering -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous" />
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" crossorigin="anonymous"></script>
 
   <link rel="stylesheet" href="style.css" />
 
-  <!-- Phaser 4.1.0 — loaded as global script (webpack bundle) -->
+  <!-- Phaser 4.1.0 — UMD global -->
   <script src="/node_modules/phaser/dist/phaser.js"></script>
 </head>
 <body>
-  <!-- Phaser Game Canvas Container -->
-  <div id="game-container">
-    <!-- Canvas is injected by Phaser here -->
-  </div>
+  <!-- Phaser Canvas -->
+  <div id="game-container"></div>
 
-  <!-- DOM HUD Overlay (managed by HudScene) -->
+  <!-- DOM HUD Overlay -->
   <div id="hud-overlay" class="hud-hidden"></div>
 
-  <!-- Game entry point - uses Phaser global from script tag above -->
+  <!-- Service Worker stub (silences 404) -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      // No service worker — stub it out silently
+      navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
+    }
+  </script>
+
+  <!-- Game Entry -->
   <script type="module" src="main.js"></script>
 </body>
 </html>

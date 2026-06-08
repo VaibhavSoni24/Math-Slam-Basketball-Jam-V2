@@ -1,6 +1,6 @@
 // ============================================================
 // BootScene.js — Asset loading scene
-// Shows loading progress, then starts MenuScene
+// Loads all images, spritesheets, and registers animations
 // ============================================================
 
 export class BootScene extends Phaser.Scene {
@@ -9,156 +9,108 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload() {
-    // Show loading UI
     this._createLoadingUI();
 
-    // Load all game assets
-    this.load.image('court_bg',   'assets/images/court_bg.png');
-    this.load.image('hoop',       'assets/images/hoop.png');
-    this.load.image('basketball', 'assets/images/basketball.png');
+    // ── Court ──────────────────────────────────────────────── //
+    this.load.image('court_bg', 'assets/images/court_bg.png');
 
-    // Player spritesheets (2x2 grid = 4 poses)
-    // Each frame is roughly 1/2 of image dimensions
-    this.load.spritesheet('player_p1', 'assets/images/player_p1.png', {
-      frameWidth: 256,
-      frameHeight: 256
+    // ── Ball Assets ────────────────────────────────────────── //
+    this.load.image('ball_idle',   'assets/images/ball_idle.png');
+    this.load.image('ball_glow',   'assets/images/ball_glow.png');
+    this.load.image('ball_shadow', 'assets/images/ball_shadow.png');
+    this.load.image('star',        'assets/images/star.png');
+
+    // Ball spin spritesheet (4 cols × 2 rows = 8 frames)
+    // The sheet is 1400×700 (approx) so each frame ~350×350
+    this.load.spritesheet('ball_spin', 'assets/sprites/ball_spin_sheet.png', {
+      frameWidth: 350,
+      frameHeight: 350
     });
-    this.load.spritesheet('player_p2', 'assets/images/player_p2.png', {
-      frameWidth: 256,
-      frameHeight: 256
-    });
+
+    // ── Player 1 (Orange) States ───────────────────────────── //
+    this.load.image('p1_idle',  'assets/images/player_orange.png');
+    this.load.image('p1_throw', 'assets/images/player_1_throw.png');
+    this.load.image('p1_happy', 'assets/images/player_1_happy.png');
+    this.load.image('p1_sad',   'assets/images/player_1_sad.png');
+    this.load.image('p1_cry',   'assets/images/player_1_cry.png');
+    this.load.image('p1_won',   'assets/images/player_1_won.png');
+
+    // ── Player 2 (Blue) States ─────────────────────────────── //
+    this.load.image('p2_idle',  'assets/images/player_blue.png');
+    this.load.image('p2_throw', 'assets/images/player_2_throw.png');
+    this.load.image('p2_happy', 'assets/images/player_2_happy.png');
+    this.load.image('p2_sad',   'assets/images/player_2_sad.png');
+    this.load.image('p2_cry',   'assets/images/player_2_cry.png');
+    this.load.image('p2_won',   'assets/images/player_2_won.png');
 
     // Progress events
-    this.load.on('progress', (value) => {
-      this._updateProgress(value);
-    });
-
-    this.load.on('complete', () => {
-      this._onLoadComplete();
-    });
+    this.load.on('progress', v  => this._updateProgress(v));
+    this.load.on('complete', () => this._onLoadComplete());
   }
 
   create() {
-    // Register sprite animations (use single image frames by index)
-    // P1 animations
+    // Register ball spin animation
     this.anims.create({
-      key: 'p1_idle',
-      frames: this.anims.generateFrameNumbers('player_p1', { frames: [0] }),
-      frameRate: 1, repeat: -1
-    });
-    this.anims.create({
-      key: 'p1_focus',
-      frames: this.anims.generateFrameNumbers('player_p1', { frames: [1] }),
-      frameRate: 1, repeat: -1
-    });
-    this.anims.create({
-      key: 'p1_shoot',
-      frames: this.anims.generateFrameNumbers('player_p1', { frames: [2] }),
-      frameRate: 1, repeat: -1
-    });
-    this.anims.create({
-      key: 'p1_celebrate',
-      frames: this.anims.generateFrameNumbers('player_p1', { frames: [3] }),
-      frameRate: 1, repeat: -1
+      key: 'ball_spin_anim',
+      frames: this.anims.generateFrameNumbers('ball_spin', { start: 0, end: 7 }),
+      frameRate: 12,
+      repeat: -1
     });
 
-    // P2 animations
-    this.anims.create({
-      key: 'p2_idle',
-      frames: this.anims.generateFrameNumbers('player_p2', { frames: [0] }),
-      frameRate: 1, repeat: -1
-    });
-    this.anims.create({
-      key: 'p2_focus',
-      frames: this.anims.generateFrameNumbers('player_p2', { frames: [1] }),
-      frameRate: 1, repeat: -1
-    });
-    this.anims.create({
-      key: 'p2_shoot',
-      frames: this.anims.generateFrameNumbers('player_p2', { frames: [2] }),
-      frameRate: 1, repeat: -1
-    });
-    this.anims.create({
-      key: 'p2_disappoint',
-      frames: this.anims.generateFrameNumbers('player_p2', { frames: [3] }),
-      frameRate: 1, repeat: -1
-    });
-
-    // Additional aliases for celebrate/disappoint using existing frames
-    this.anims.create({
-      key: 'p2_celebrate',
-      frames: this.anims.generateFrameNumbers('player_p2', { frames: [3] }),
-      frameRate: 1, repeat: -1
-    });
-
-    this.anims.create({
-      key: 'p1_disappoint',
-      frames: this.anims.generateFrameNumbers('player_p1', { frames: [1] }),
-      frameRate: 1, repeat: -1
-    });
-
-    // Transition to menu
-    this.time.delayedCall(400, () => {
+    // Transition to menu after brief pause
+    this.time.delayedCall(350, () => {
       this.scene.start('MenuScene');
     });
   }
 
+  // ── Loading UI ────────────────────────────────────────── //
+
   _createLoadingUI() {
     const { width, height } = this.scale;
 
-    // Dark background
     this.add.rectangle(width / 2, height / 2, width, height, 0x1A1A2E);
 
-    // Logo text
-    this.add.text(width / 2, height / 2 - 60, 'MATH SLAM', {
+    // Basketball icon
+    this.add.text(width / 2, height / 2 - 80, '🏀', { fontSize: 56 }).setOrigin(0.5);
+
+    this.add.text(width / 2, height / 2 - 16, 'MATH SLAM', {
       fontFamily: "'Bebas Neue', sans-serif",
-      fontSize: 48,
+      fontSize: 52,
       color: '#E85D04',
       letterSpacing: 8
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, height / 2 - 16, 'BASKETBALL JAM', {
+    this.add.text(width / 2, height / 2 + 36, 'BASKETBALL JAM', {
       fontFamily: "'Bebas Neue', sans-serif",
-      fontSize: 24,
+      fontSize: 28,
       color: '#1A6FBF',
       letterSpacing: 4
     }).setOrigin(0.5);
 
-    // Progress bar background
-    const barW = 320, barH = 6;
+    // Progress bar
+    const barW = 340, barH = 8;
     const barX = width / 2 - barW / 2;
-    const barY = height / 2 + 40;
+    const barY = height / 2 + 90;
 
-    this.add.rectangle(width / 2, barY + barH / 2, barW, barH, 0x0F3460);
+    this.add.rectangle(width / 2, barY + barH / 2, barW, barH, 0x0F3460).setOrigin(0.5, 0.5);
+    this._progressFill = this.add.rectangle(barX, barY, 0, barH, 0xE85D04).setOrigin(0, 0);
 
-    // Progress fill
-    this._progressFill = this.add.rectangle(barX, barY + barH / 2, 0, barH, 0xE85D04)
-      .setOrigin(0, 0.5);
-
-    // Loading label
-    this._loadingText = this.add.text(width / 2, barY + 20, 'Loading...', {
+    this._loadingText = this.add.text(width / 2, barY + 22, 'Loading...', {
       fontFamily: 'Inter, sans-serif',
-      fontSize: 12,
+      fontSize: 13,
       color: '#94A3B8',
       letterSpacing: 2
-    }).setOrigin(0.5);
-
-    // Basketball emoji spinning
-    this._ball = this.add.text(width / 2, height / 2 + 80, '🏀', {
-      fontSize: 32
     }).setOrigin(0.5);
   }
 
   _updateProgress(value) {
-    const barW = 320;
-    const filled = value * barW;
-    if (this._progressFill) this._progressFill.width = filled;
-    if (this._loadingText) this._loadingText.setText(`Loading... ${Math.round(value * 100)}%`);
-    if (this._ball) this._ball.angle += 5;
+    const barW = 340;
+    if (this._progressFill) this._progressFill.width = value * barW;
+    if (this._loadingText)  this._loadingText.setText(`Loading... ${Math.round(value * 100)}%`);
   }
 
   _onLoadComplete() {
-    if (this._loadingText) this._loadingText.setText('Ready!');
-    if (this._progressFill) this._progressFill.width = 320;
+    if (this._loadingText)  this._loadingText.setText('Ready!');
+    if (this._progressFill) this._progressFill.width = 340;
   }
 }

@@ -1,6 +1,7 @@
 // ============================================================
-// PlayScene.js — Core game loop
-// Manages: court, players, ball, problem cycle, shot mechanic
+// PlayScene.js — Core game loop (Phaser canvas layer)
+// Handles: court, players, ball physics, shot mechanic, AI
+// HUD (DOM) is managed by HudScene running in parallel
 // ============================================================
 
 import { MathEngine }   from '../game/MathEngine.js';
@@ -10,25 +11,31 @@ import { ShotMechanic } from '../game/ShotMechanic.js';
 const W = 1280;
 const H = 720;
 
-// Game states
 const STATE = {
-  COUNTDOWN:  'countdown',
-  PROBLEM:    'problem',
-  SHOT:       'shot',
-  RESULT:     'result',
-  BUFFER:     'buffer',
-  GAMEOVER:   'gameover'
+  COUNTDOWN: 'countdown',
+  PROBLEM:   'problem',
+  SHOT:      'shot',
+  RESULT:    'result',
+  BUFFER:    'buffer',
+  GAMEOVER:  'gameover'
 };
 
-// Positions
-const P1_X = 220;
-const P2_X = 1060;
-const PLAYER_Y = 500;
-const HOOP_LEFT_X  = 120;
-const HOOP_RIGHT_X = 1160;
-const HOOP_Y = 360;
-const BALL_START_P1 = { x: P1_X, y: PLAYER_Y - 60 };
-const BALL_START_P2 = { x: P2_X, y: PLAYER_Y - 60 };
+// Layout constants (calibrated to court_bg which has hoops on each side)
+const P1_X          = 260;
+const P2_X          = 1020;
+const PLAYER_Y      = 580;   // feet on floor
+const PLAYER_W      = 180;
+const PLAYER_H      = 230;
+
+// Hoop rim center positions in court_bg image (1280×720)
+const HOOP_LEFT_X   = 280;
+const HOOP_RIGHT_X  = 1000;
+const HOOP_Y        = 300;
+
+// Ball starting positions (in player's hands)
+const BALL_P1 = { x: P1_X + 80,  y: PLAYER_Y - 180 };
+const BALL_P2 = { x: P2_X - 80,  y: PLAYER_Y - 180 };
+const BALL_SIZE = 72;
 
 export class PlayScene extends Phaser.Scene {
   constructor() {
@@ -36,276 +43,222 @@ export class PlayScene extends Phaser.Scene {
   }
 
   init(data) {
-    this.gameMode = data.mode || 'solo';
-    this.gameTier = data.tier || 'pro';
+    this.gameMode   = data.mode || 'solo';
+    this.gameTier   = data.tier || 'pro';
 
-    // Game state
-    this.state = STATE.COUNTDOWN;
+    this.state          = STATE.COUNTDOWN;
     this.currentProblem = null;
-    this.problemIndex = 0;
-    this.totalProblems = this.gameMode === 'flat' ? 10 : Phaser.Math.Between(8, 12);
-    this.problemTimer = 0;
-    this.problemTimeLimit = this.gameMode === 'flat' ? 999 : 10; // seconds
+    this.problemIndex   = 0;
+    this.totalProblems  = this.gameMode === 'flat' ? 10 : Phaser.Math.Between(9, 12);
+    this.problemTimeLimit = this.gameMode === 'flat' ? 999 : 12;
 
-    // Player 1 state
-    this.p1 = { score: 0, lives: 3, streak: 0, hasPossession: false, name: 'YOU' };
-    // Player 2 / CPU state
-    this.p2 = { score: 0, lives: 3, streak: 0, hasPossession: false, name: this.gameMode === 'local2p' ? 'P2' : 'CPU Shaq' };
+    // Player state
+    this.p1 = { score: 0, lives: 3, streak: 0, totalTime: 0, name: 'YOU' };
+    this.p2 = {
+      score: 0, lives: 3, streak: 0, totalTime: 0,
+      name: this.gameMode === 'local2p' ? 'PLAYER 2' : 'CPU SHAQ'
+    };
 
-    this.whoHasPossession = null; // 'p1' | 'p2' | null
-    this.shotPhaseActive = false;
-    this.p1Answered = false;
-    this.p2Answered = false;
-    this.cpuAnswerScheduled = false;
+    // 2P turn system: alternate who answers first per problem
+    this.turnOwner       = 'p1'; // who answers this round (alternates in 2P)
+    this.p1Answered      = false;
+    this.p2Answered      = false;
+    this.whoHasPossession = null;
+    this.shotPhaseActive  = false;
+    this._problemTimerEvent = null;
+    this._shotTimeout       = null;
   }
 
   create() {
-    const audio = window.gameAudio;
-    if (audio) audio.init();
-
-    // ── Canvas Elements ──────────────────────────────────── //
+    // ── Canvas visuals ────────────────────────────────────── //
     this._createCourt();
-    this._createHoops();
     this._createPlayers();
     this._createBall();
-    this._createFlashGraphics();
+    this._createShadow();
+    this._createBallGlow();
 
-    // ── Input ─────────────────────────────────────────────── //
-    this._setupInput();
-
-    // ── Engine + CPU ──────────────────────────────────────── //
+    // ── Engines ───────────────────────────────────────────── //
     this.mathEngine = new MathEngine();
     this.mathEngine.setTier(this.gameTier);
 
     this.cpu = new CPUPlayer();
-    this.cpu.setSpeedTier(this.gameTier === 'varsity' ? 'easy' :
-                          this.gameTier === 'pro'     ? 'medium' : 'hard');
+    this.cpu.setSpeedTier(
+      this.gameTier === 'varsity' ? 'easy' :
+      this.gameTier === 'pro'     ? 'medium' : 'hard'
+    );
 
     this.shotMechanic = new ShotMechanic();
 
-    // ── Events with HudScene ──────────────────────────────── //
-    this.events.on('player-answered', this._onPlayerAnswered, this);
+    // ── Input ─────────────────────────────────────────────── //
+    this._setupInput();
+
+    // ── Listen for HUD events ─────────────────────────────── //
+    this.events.on('player-answered',   this._onPlayerAnswered, this);
+    this.events.on('p2-player-answered',this._onP2PlayerAnswered, this);
+
+    // ── Init audio ────────────────────────────────────────── //
+    if (window.gameAudio) {
+      window.gameAudio.init().catch(() => {});
+    }
 
     // ── Start countdown ───────────────────────────────────── //
     this._startCountdown();
   }
 
-  // ── Court & Visuals ──────────────────────────────────────── //
+  // ── Court ─────────────────────────────────────────────── //
 
   _createCourt() {
     const { width, height } = this.scale;
-
-    // Background
-    const bg = this.textures.exists('court_bg')
-      ? this.add.image(width / 2, height / 2, 'court_bg').setDisplaySize(width, height)
-      : (() => {
-          const g = this.add.graphics();
-          g.fillGradientStyle(0x0a0a1e, 0x0a0a1e, 0x1A1A2E, 0x0F2040, 1);
-          g.fillRect(0, 0, width, height);
-          return g;
-        })();
-
-    // Overlay court floor
-    const floor = this.add.graphics();
-    floor.fillGradientStyle(0xC8864E, 0xC8864E, 0xA86C3A, 0xA86C3A, 0.85);
-    floor.fillRect(0, H - 220, width, 220);
-
-    // Court lines
-    floor.lineStyle(3, 0xffffff, 0.5);
-    floor.strokeRect(50, H - 210, width - 100, 200);
-    floor.strokeCircle(width / 2, H - 110, 60);
-    floor.moveTo(width / 2, H - 220);
-    floor.lineTo(width / 2, H - 20);
-    floor.strokePath();
-
-    // Paint areas (free throw lanes)
-    floor.lineStyle(3, 0xffffff, 0.4);
-    floor.strokeRect(50, H - 210, 220, 160);
-    floor.strokeRect(width - 270, H - 210, 220, 160);
-  }
-
-  _createHoops() {
-    const hoopExists = this.textures.exists('hoop');
-
-    // Left hoop (P2 shoots here from right, P1 defends)
-    if (hoopExists) {
-      this.hoopLeft = this.add.image(HOOP_LEFT_X, HOOP_Y, 'hoop')
-        .setDisplaySize(120, 100)
-        .setDepth(5);
+    if (this.textures.exists('court_bg')) {
+      this.add.image(width / 2, height / 2, 'court_bg')
+        .setDisplaySize(width, height)
+        .setDepth(0);
     } else {
-      this._drawHoop(HOOP_LEFT_X, HOOP_Y, 'left');
+      const g = this.add.graphics();
+      g.fillGradientStyle(0x0a0a1e, 0x0a0a1e, 0x1A1A2E, 0x0F2040, 1);
+      g.fillRect(0, 0, width, height);
+      // Simple court floor
+      g.fillStyle(0xC8864E, 0.8);
+      g.fillRect(0, H - 200, width, 200);
     }
-
-    // Right hoop (P1 shoots here from left, P2 defends)
-    if (hoopExists) {
-      this.hoopRight = this.add.image(HOOP_RIGHT_X, HOOP_Y, 'hoop')
-        .setDisplaySize(120, 100)
-        .setDepth(5)
-        .setFlipX(true);
-    } else {
-      this._drawHoop(HOOP_RIGHT_X, HOOP_Y, 'right');
-    }
-
-    // Basket net flash (hidden initially)
-    this.netFlashLeft  = this.add.graphics().setDepth(10).setAlpha(0);
-    this.netFlashRight = this.add.graphics().setDepth(10).setAlpha(0);
-  }
-
-  _drawHoop(x, y, side) {
-    const g = this.add.graphics().setDepth(5);
-    const flip = side === 'right' ? -1 : 1;
-
-    // Backboard
-    g.lineStyle(4, 0xaaaaaa, 1);
-    g.fillStyle(0x444466, 0.8);
-    g.fillRect(x + flip * 30, y - 40, 8, 70);
-    g.strokeRect(x + flip * 30, y - 40, 8, 70);
-
-    // Rim
-    g.lineStyle(5, 0xE85D04, 1);
-    g.strokeRect(x - 35, y, 70, 8);
-
-    // Net lines
-    g.lineStyle(2, 0xffffff, 0.7);
-    for (let i = 0; i <= 5; i++) {
-      const nx = x - 30 + i * 12;
-      g.moveTo(nx, y + 8);
-      g.lineTo(nx + (i < 3 ? -4 : 4), y + 40);
-      g.strokePath();
-    }
-    g.moveTo(x - 30, y + 8);
-    g.lineTo(x + 30, y + 8);
-    g.strokePath();
-    g.moveTo(x - 26, y + 24);
-    g.lineTo(x + 26, y + 24);
-    g.strokePath();
-    g.moveTo(x - 20, y + 40);
-    g.lineTo(x + 20, y + 40);
-    g.strokePath();
   }
 
   _createPlayers() {
-    const p1Exists = this.textures.exists('player_p1');
-    const p2Exists = this.textures.exists('player_p2');
+    const p1Key = this.textures.exists('p1_idle') ? 'p1_idle' : null;
+    const p2Key = this.textures.exists('p2_idle') ? 'p2_idle' : null;
 
-    if (p1Exists) {
-      this.playerP1 = this.add.sprite(P1_X, PLAYER_Y, 'player_p1', 0)
-        .setDisplaySize(120, 120)
-        .setDepth(8);
-      this.playerP1.play('p1_idle');
+    if (p1Key) {
+      this.playerP1 = this.add.image(P1_X, PLAYER_Y, p1Key)
+        .setDisplaySize(PLAYER_W, PLAYER_H)
+        .setDepth(8)
+        .setOrigin(0.5, 1);
     } else {
       this.playerP1 = this._drawPlayerFallback(P1_X, PLAYER_Y, 0xE85D04, 'P1');
     }
 
-    if (p2Exists) {
-      this.playerP2 = this.add.sprite(P2_X, PLAYER_Y, 'player_p2', 0)
-        .setDisplaySize(120, 120)
+    if (p2Key) {
+      this.playerP2 = this.add.image(P2_X, PLAYER_Y, p2Key)
+        .setDisplaySize(PLAYER_W, PLAYER_H)
         .setDepth(8)
+        .setOrigin(0.5, 1)
         .setFlipX(true);
-      this.playerP2.play('p2_idle');
     } else {
       this.playerP2 = this._drawPlayerFallback(P2_X, PLAYER_Y, 0x1A6FBF, 'P2');
     }
 
     // Player name labels
-    this._p1Label = this.add.text(P1_X, PLAYER_Y + 70, this.p1.name, {
-      fontFamily: "'Bebas Neue', sans-serif",
-      fontSize: 18,
-      color: '#E85D04',
-      letterSpacing: 2
+    this.add.text(P1_X, PLAYER_Y + 12, this.p1.name, {
+      fontFamily: "'Nunito', sans-serif",
+      fontSize: 16, fontStyle: 'bold',
+      color: '#FF8C3A', stroke: '#000', strokeThickness: 3
     }).setOrigin(0.5).setDepth(9);
 
-    this._p2Label = this.add.text(P2_X, PLAYER_Y + 70, this.p2.name, {
-      fontFamily: "'Bebas Neue', sans-serif",
-      fontSize: 18,
-      color: '#1A6FBF',
-      letterSpacing: 2
+    this.add.text(P2_X, PLAYER_Y + 12, this.p2.name, {
+      fontFamily: "'Nunito', sans-serif",
+      fontSize: 16, fontStyle: 'bold',
+      color: '#4DA6FF', stroke: '#000', strokeThickness: 3
     }).setOrigin(0.5).setDepth(9);
   }
 
   _drawPlayerFallback(x, y, color, label) {
     const g = this.add.graphics().setDepth(8);
-    // Body
     g.fillStyle(color, 1);
-    g.fillCircle(x, y - 50, 28); // Head
-    g.fillRect(x - 22, y - 25, 44, 60); // Body
-    g.fillRect(x - 28, y - 20, 18, 50); // Left arm
-    g.fillRect(x + 10, y - 20, 18, 50); // Right arm
-    g.fillRect(x - 20, y + 34, 18, 50); // Left leg
-    g.fillRect(x + 2, y + 34, 18, 50); // Right leg
-
-    // Jersey number
-    g.fillStyle(0xffffff, 1);
-    const txt = this.add.text(x, y + 5, label, {
-      fontFamily: "'Bebas Neue', sans-serif",
-      fontSize: 16, color: '#ffffff'
-    }).setOrigin(0.5).setDepth(9);
-
+    g.fillCircle(x, y - 80, 24);
+    g.fillRect(x - 18, y - 58, 36, 55);
     return g;
   }
 
-  _createBall() {
-    const ballExists = this.textures.exists('basketball');
-
-    if (ballExists) {
-      this.ball = this.add.sprite(P1_X, BALL_START_P1.y - 20, 'basketball', 0)
-        .setDisplaySize(48, 48)
-        .setDepth(10)
-        .setAlpha(0);
-    } else {
-      // Fallback drawn ball
-      const ballG = this.add.graphics().setDepth(10).setAlpha(0);
-      ballG.fillStyle(0xE8651A, 1);
-      ballG.fillCircle(0, 0, 24);
-      ballG.lineStyle(2, 0x333333, 1);
-      ballG.strokeCircle(0, 0, 24);
-      ballG.x = P1_X; ballG.y = BALL_START_P1.y - 20;
-      this.ball = ballG;
+  _setPlayerSprite(player, key) {
+    // player = this.playerP1 or this.playerP2
+    if (!player || typeof player.setTexture !== 'function') return;
+    if (this.textures.exists(key)) {
+      player.setTexture(key);
     }
-
-    this.ballOwner = null; // 'p1' | 'p2' | null
   }
 
-  _createFlashGraphics() {
-    // Full-screen flash for correct/wrong feedback
-    this.flashGraphics = this.add.graphics().setDepth(50);
-    this.flashGraphics.setAlpha(0);
+  _createBall() {
+    // Use spinning spritesheet if available; fall back to idle image
+    if (this.textures.exists('ball_spin')) {
+      this.ball = this.add.sprite(BALL_P1.x, BALL_P1.y, 'ball_spin', 0)
+        .setDisplaySize(BALL_SIZE, BALL_SIZE)
+        .setDepth(12)
+        .setAlpha(0);
+    } else if (this.textures.exists('ball_idle')) {
+      this.ball = this.add.image(BALL_P1.x, BALL_P1.y, 'ball_idle')
+        .setDisplaySize(BALL_SIZE, BALL_SIZE)
+        .setDepth(12)
+        .setAlpha(0);
+    } else {
+      const g = this.add.graphics().setDepth(12).setAlpha(0);
+      g.fillStyle(0xE8651A, 1);
+      g.fillCircle(0, 0, BALL_SIZE / 2);
+      g.x = BALL_P1.x; g.y = BALL_P1.y;
+      this.ball = g;
+    }
+    this.ballOwner = null;
+  }
+
+  _createShadow() {
+    if (this.textures.exists('ball_shadow')) {
+      this.ballShadow = this.add.image(0, 0, 'ball_shadow')
+        .setDisplaySize(60, 20)
+        .setDepth(7)
+        .setAlpha(0);
+    }
+  }
+
+  _createBallGlow() {
+    if (this.textures.exists('ball_glow')) {
+      this.ballGlow = this.add.image(0, 0, 'ball_glow')
+        .setDisplaySize(120, 120)
+        .setDepth(13)
+        .setAlpha(0);
+    }
   }
 
   // ── Input Setup ──────────────────────────────────────────── //
 
   _setupInput() {
-    this.input.keyboard.on('keydown-ENTER', this._onEnterPressed, this);
-    this.input.keyboard.on('keydown-SPACE', this._onSpacePressed, this);
-
-    // P2 local input (right Enter = numpad Enter)
-    this.input.keyboard.on('keydown-NUMPAD_ENTER', () => {
-      if (this.gameMode === 'local2p') this._onP2Answered();
+    // P1: Space or Enter releases shot
+    this.input.keyboard.on('keydown-SPACE', () => {
+      if (this.state === STATE.SHOT && this.whoHasPossession === 'p1') {
+        this._releaseShotP1();
+      }
+    });
+    this.input.keyboard.on('keydown-ENTER', () => {
+      if (this.state === STATE.SHOT && this.whoHasPossession === 'p1') {
+        this._releaseShotP1();
+      }
     });
   }
 
-  // ── Countdown ────────────────────────────────────────────── //
+  // ── Countdown ─────────────────────────────────────────────── //
 
   _startCountdown() {
     this.state = STATE.COUNTDOWN;
-    const overlay = document.getElementById('countdown-overlay');
-    if (!overlay) return;
-    overlay.classList.add('show');
+
+    let el = document.getElementById('countdown-overlay');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'countdown-overlay';
+      document.body.appendChild(el);
+    }
+    el.className = 'show';
 
     let count = 3;
     const tick = () => {
-      if (window.gameAudio) window.gameAudio.playCountdown();
-      overlay.innerHTML = `<div class="countdown-num">${count}</div>`;
+      window.gameAudio?.playCountdown?.();
+      el.innerHTML = `<div class="countdown-num">${count}</div>`;
       count--;
       if (count > 0) {
-        this.time.delayedCall(1000, tick);
+        this.time.delayedCall(900, tick);
       } else {
-        this.time.delayedCall(1000, () => {
-          overlay.innerHTML = `<div class="countdown-num" style="color:#E85D04">GO!</div>`;
-          if (window.gameAudio) window.gameAudio.playCountdownGo();
-          this.time.delayedCall(700, () => {
-            overlay.classList.remove('show');
-            if (window.gameAudio) window.gameAudio.startMusic();
+        this.time.delayedCall(900, () => {
+          el.innerHTML = `<div class="countdown-num go">GO!</div>`;
+          window.gameAudio?.playCountdownGo?.();
+          this.time.delayedCall(650, () => {
+            el.className = '';
+            window.gameAudio?.startMusic?.();
             this._nextProblem();
           });
         });
@@ -314,7 +267,7 @@ export class PlayScene extends Phaser.Scene {
     tick();
   }
 
-  // ── Problem Cycle ────────────────────────────────────────── //
+  // ── Problem Cycle ──────────────────────────────────────────── //
 
   _nextProblem() {
     if (this.problemIndex >= this.totalProblems) {
@@ -322,119 +275,165 @@ export class PlayScene extends Phaser.Scene {
       return;
     }
 
-    // Check flat mode batch done
-    if (this.gameMode === 'flat' && this.problemIndex >= 10) {
-      this._endMatch();
-      return;
-    }
-
-    this.state = STATE.PROBLEM;
-    this.p1Answered = false;
-    this.p2Answered = false;
+    this.state         = STATE.PROBLEM;
+    this.p1Answered    = false;
+    this.p2Answered    = false;
     this.whoHasPossession = null;
-    this.shotPhaseActive = false;
-    this.problemTimer = 0;
+    this.shotPhaseActive  = false;
     this.problemIndex++;
+
+    // Alternate who answers first in 2P mode
+    if (this.gameMode === 'local2p') {
+      this.turnOwner = this.problemIndex % 2 === 1 ? 'p1' : 'p2';
+    } else {
+      this.turnOwner = 'p1'; // P1 always answers in solo/flat
+    }
 
     // Generate problem
     this.currentProblem = this.mathEngine.generateProblem();
+    this._roundStartTime = Date.now();
 
-    // Tell HUD to display new problem
+    // Notify HUD
     this.events.emit('new-problem', {
-      problem: this.currentProblem,
-      index: this.problemIndex,
-      total: this.totalProblems,
-      timeLimit: this.problemTimeLimit
+      problem:   this.currentProblem,
+      index:     this.problemIndex,
+      total:     this.totalProblems,
+      timeLimit: this.problemTimeLimit,
+      turnOwner: this.turnOwner,
+      mode:      this.gameMode
     });
 
-    // Player animations: focus
-    this._playAnim(this.playerP1, 'p1_focus');
-    this._playAnim(this.playerP2, 'p2_focus');
+    // Player sprites — focus pose
+    this._setPlayerSprite(this.playerP1, 'p1_idle');
+    this._setPlayerSprite(this.playerP2, 'p2_idle');
 
-    // CPU: schedule answer (solo + flat mode)
+    // CPU answers in solo/flat mode
     if (this.gameMode !== 'local2p') {
-      this.cpuAnswerScheduled = true;
-      const timeLimit = this.gameMode === 'flat' ? 8 : this.problemTimeLimit;
-      this.cpu.scheduleProblem(this.currentProblem, timeLimit, (isCorrect, timeTaken, timedOut) => {
-        this.cpuAnswerScheduled = false;
+      this.cpu.scheduleProblem(this.currentProblem, this.problemTimeLimit, (isCorrect, timeTaken, timedOut) => {
         if (!this.p2Answered && this.state === STATE.PROBLEM) {
           this._onCPUAnswered(isCorrect, timedOut);
         }
       });
     }
 
-    // Problem timer countdown (shown in HUD)
+    // Problem timer
+    let timerCount = 0;
     this._problemTimerEvent = this.time.addEvent({
       delay: 1000,
       repeat: this.problemTimeLimit - 1,
       callback: () => {
-        this.problemTimer++;
-        const remaining = this.problemTimeLimit - this.problemTimer;
+        timerCount++;
+        const remaining = this.problemTimeLimit - timerCount;
         this.events.emit('timer-tick', remaining);
-        if (remaining <= 5 && remaining > 0 && window.gameAudio) {
-          window.gameAudio.playUrgentTick();
-        }
-        if (remaining <= 0) {
-          this._onProblemTimeout();
-        }
+        if (remaining <= 5 && remaining > 0) window.gameAudio?.playUrgentTick?.();
+        if (remaining <= 0) this._onProblemTimeout();
       }
     });
   }
 
-  _onEnterPressed() {
-    if (this.state === STATE.SHOT && this.whoHasPossession === 'p1') {
-      this._releaseShotP1();
-    }
-  }
+  // ── Answer Handling ──────────────────────────────────────── //
 
-  _onSpacePressed() {
-    if (this.state === STATE.SHOT && this.whoHasPossession === 'p1') {
-      this._releaseShotP1();
-    }
-  }
-
-  // Called from HUD when player types an answer and submits
+  // P1 (player 1 / human solo)
   _onPlayerAnswered(userAnswer) {
-    if (this.state !== STATE.PROBLEM || this.p1Answered) return;
+    if (this.state !== STATE.PROBLEM) return;
+    if (this.p1Answered) return;
+
+    // In 2P mode, only process if it's P1's turn
+    if (this.gameMode === 'local2p' && this.turnOwner !== 'p1') return;
+
     this.p1Answered = true;
+    const timeTaken = (Date.now() - this._roundStartTime) / 1000;
+    this.p1.totalTime += timeTaken;
 
     if (this._problemTimerEvent) this._problemTimerEvent.remove();
     this.cpu.cancelProblem();
 
-    const verdict = this.mathEngine.submitAttempt(userAnswer, this.currentProblem, this.p1.lives, this.p1.score);
+    const verdict = this.mathEngine.submitAttempt(
+      userAnswer, this.currentProblem, this.p1.lives, this.p1.score
+    );
 
     if (verdict.correct) {
-      this.p1.score += verdict.score_delta;
-      this.p1.streak = verdict.streak;
+      this.p1.score  += verdict.score_delta;
+      this.p1.streak  = verdict.streak;
       this.whoHasPossession = 'p1';
-      this._showPossession('p1', 'YOU GOT IT!');
-      this._flashCorrect();
-      this.events.emit('p1-verdict', { correct: true, score: this.p1.score, streak: this.p1.streak });
-      this.events.emit('p2-status', 'Too Slow! 😅');
-      if (window.gameAudio) window.gameAudio.playCorrect();
+      window.gameAudio?.playCorrect?.();
+
+      this.events.emit('p1-verdict', {
+        correct: true, score: this.p1.score,
+        streak:  this.p1.streak, delta: verdict.score_delta
+      });
+
+      if (this.gameMode === 'local2p') {
+        // In 2P mode, the other player (P2) now gets a shot chance too
+        // But P1 answered first correctly → P1 gets possession
+        this.events.emit('p2-status', 'P1 answered first!');
+      } else {
+        this.events.emit('p2-status', 'Too slow! 😅');
+      }
+
+      this._showPossession('p1', 'YOU GOT IT! 🏀');
+      this._flashScreen('#22C55E');
+
       if (this.p1.streak >= 3 && this.p1.streak % 3 === 0) {
         this.events.emit('hot-streak', { player: 'p1', streak: this.p1.streak });
-        if (window.gameAudio) window.gameAudio.playHotStreak();
+        window.gameAudio?.playHotStreak?.();
       }
+
       this._startShotPhase('p1');
     } else {
-      this.p1.streak = 0;
-      this._flashWrong();
-      this.events.emit('p1-verdict', { correct: false, score: this.p1.score, streak: 0 });
-      this.events.emit('wrong-answer', { correctAnswer: this.currentProblem.answer });
-      if (window.gameAudio) window.gameAudio.playWrong();
-      // Wrong answer doesn't cost a life — allow retry
+      // Wrong answer — allow retry
       this.p1Answered = false;
-      // Re-enable input
-      this.events.emit('allow-retry', { correctAnswer: this.currentProblem.answer });
+      window.gameAudio?.playWrong?.();
+      this._flashScreen('#EF4444', 0.15);
+      this.events.emit('p1-verdict', { correct: false, score: this.p1.score, streak: 0 });
+      this.events.emit('allow-retry', {});
     }
   }
 
+  // P2 human (local 2P mode)
+  _onP2PlayerAnswered(userAnswer) {
+    if (this.state !== STATE.PROBLEM) return;
+    if (this.p2Answered) return;
+    if (this.gameMode !== 'local2p') return;
+    if (this.turnOwner !== 'p2') return;
+
+    this.p2Answered = true;
+    const timeTaken = (Date.now() - this._roundStartTime) / 1000;
+    this.p2.totalTime += timeTaken;
+
+    if (this._problemTimerEvent) this._problemTimerEvent.remove();
+
+    const verdict = this.mathEngine.submitAttempt(
+      userAnswer, this.currentProblem, this.p2.lives, this.p2.score
+    );
+
+    if (verdict.correct) {
+      this.p2.score  += verdict.score_delta;
+      this.p2.streak  = verdict.streak;
+      this.whoHasPossession = 'p2';
+      window.gameAudio?.playCorrect?.();
+
+      this.events.emit('p2-verdict', {
+        correct: true, score: this.p2.score,
+        streak:  this.p2.streak, delta: verdict.score_delta
+      });
+      this.events.emit('p1-status', 'P2 answered first!');
+      this._showPossession('p2', 'P2 GOT IT! 🏀');
+      this._flashScreen('#4DA6FF', 0.15);
+      this._playCPUShotSequence(); // P2 shoots
+    } else {
+      this.p2Answered = false;
+      window.gameAudio?.playWrong?.();
+      this.events.emit('p2-verdict', { correct: false, score: this.p2.score, streak: 0 });
+      this.events.emit('allow-p2-retry', {});
+    }
+  }
+
+  // CPU answers
   _onCPUAnswered(isCorrect, timedOut) {
-    if (this.p1Answered || this.state !== STATE.PROBLEM) return;
+    if (this.state !== STATE.PROBLEM || this.p1Answered) return;
 
     if (timedOut) {
-      // CPU timed out — P1 still has time
       this.events.emit('p2-status', 'Thinking...');
       return;
     }
@@ -443,36 +442,32 @@ export class PlayScene extends Phaser.Scene {
     if (this._problemTimerEvent) this._problemTimerEvent.remove();
 
     if (isCorrect) {
-      this.p2.score += 10;
-      this.p2.streak++;
+      this.p2.score  += 10;
+      this.p2.streak += 1;
       this.whoHasPossession = 'p2';
-      this._showPossession('p2', 'CPU SCORES!');
+
       this.events.emit('p2-verdict', { correct: true, score: this.p2.score, streak: this.p2.streak });
-      this.events.emit('p1-status', 'Too Slow!');
-      if (window.gameAudio) window.gameAudio.playWrong();
+      this.events.emit('p1-status', 'CPU was faster!');
+      this._showPossession('p2', 'CPU SNATCHES IT!');
       this._playCPUShotSequence();
     } else {
       this.p2.streak = 0;
-      // CPU was wrong — P1 can still answer
       this.events.emit('p2-status', 'CPU missed...');
     }
   }
 
   _onProblemTimeout() {
     if (this.state !== STATE.PROBLEM) return;
-
     this.cpu.cancelProblem();
 
-    // Neither answered in time
-    if (this.gameMode !== 'flat') {
-      if (!this.p1Answered) {
-        this.p1.lives = Math.max(0, this.p1.lives - 1);
-        this.events.emit('p1-lost-life', this.p1.lives);
-      }
-      if (!this.p2Answered) {
-        this.p2.lives = Math.max(0, this.p2.lives - 1);
-        this.events.emit('p2-lost-life', this.p2.lives);
-      }
+    // Lose life if not already answered
+    if (!this.p1Answered && this.gameMode !== 'flat') {
+      this.p1.lives = Math.max(0, this.p1.lives - 1);
+      this.events.emit('p1-lost-life', this.p1.lives);
+    }
+    if (!this.p2Answered && this.gameMode !== 'flat') {
+      this.p2.lives = Math.max(0, this.p2.lives - 1);
+      this.events.emit('p2-lost-life', this.p2.lives);
     }
 
     this.events.emit('timeout');
@@ -480,47 +475,53 @@ export class PlayScene extends Phaser.Scene {
 
     // Check elimination
     if (this.p1.lives <= 0 || (this.p2.lives <= 0 && this.gameMode !== 'flat')) {
-      this.time.delayedCall(1200, () => this._endMatch());
+      this.time.delayedCall(1400, () => this._endMatch());
       return;
     }
 
-    this.time.delayedCall(1200, () => this._nextProblem());
+    this.time.delayedCall(1400, () => this._nextProblem());
   }
 
-  _onP2Answered() {
-    // Local 2P mode: P2 presses Enter when they've typed their answer
-    // HUD handles collecting P2's typed answer and fires this
-  }
-
-  // ── Shot Phase ─────────────────────────────────────────────── //
+  // ── Shot Phase ──────────────────────────────────────────── //
 
   _startShotPhase(shooter) {
     this.state = STATE.SHOT;
     this.shotPhaseActive = true;
 
-    // Animate to shooting pose
-    if (shooter === 'p1') {
-      this._playAnim(this.playerP1, 'p1_shoot');
-    } else {
-      this._playAnim(this.playerP2, 'p2_shoot');
+    // Show ball at shooter's position
+    const pos = shooter === 'p1' ? BALL_P1 : BALL_P2;
+    this.ball.x = pos.x;
+    this.ball.y = pos.y;
+    this.ball.angle = 0;
+    this.ball.setAlpha(1);
+
+    // Play spin animation if it's a sprite
+    if (this.ball.play && this.anims.exists('ball_spin_anim')) {
+      this.ball.play('ball_spin_anim');
     }
 
-    // Show ball
-    const startPos = shooter === 'p1' ? BALL_START_P1 : BALL_START_P2;
-    this.ball.setAlpha(1);
-    this.ball.x = startPos.x;
-    this.ball.y = startPos.y;
+    // Shadow
+    if (this.ballShadow) {
+      this.ballShadow.setPosition(pos.x, PLAYER_Y - 10);
+      this.ballShadow.setAlpha(0.5);
+    }
+
+    // Switch to throw sprite
+    if (shooter === 'p1') {
+      this._setPlayerSprite(this.playerP1, 'p1_throw');
+    } else {
+      this._setPlayerSprite(this.playerP2, 'p2_throw');
+    }
 
     // Start power bar
     this.shotMechanic.start((power, zone) => {
       this.events.emit('power-update', { power, zone });
     });
 
-    // Show shoot instruction in HUD
     this.events.emit('shot-phase-start', { shooter });
 
-    // Auto-timeout if player doesn't shoot in 4 seconds
-    this._shotTimeout = this.time.delayedCall(4000, () => {
+    // Auto-timeout after 4.5s
+    this._shotTimeout = this.time.delayedCall(4500, () => {
       if (this.state === STATE.SHOT) {
         const result = this.shotMechanic.timeout();
         this._executeShotResult(shooter, result);
@@ -531,7 +532,6 @@ export class PlayScene extends Phaser.Scene {
   _releaseShotP1() {
     if (!this.shotMechanic.isActive) return;
     if (this._shotTimeout) this._shotTimeout.remove();
-
     const result = this.shotMechanic.release();
     this._executeShotResult('p1', result);
   }
@@ -540,162 +540,168 @@ export class PlayScene extends Phaser.Scene {
     this.state = STATE.RESULT;
     this.events.emit('power-update', { power: 0, zone: { name: 'hidden' } });
     this.events.emit('shot-phase-end');
+    window.gameAudio?.playWhoosh?.();
 
-    if (window.gameAudio) window.gameAudio.playWhoosh();
+    const isP1  = shooter === 'p1';
+    const targetX = isP1 ? HOOP_RIGHT_X : HOOP_LEFT_X;
+    const startPos = isP1 ? BALL_P1 : BALL_P2;
+    const duration = result.scored ? 900 : 700;
+    const endX = result.scored ? targetX : targetX + (isP1 ? 80 : -80);
+    const endY = result.scored ? HOOP_Y + 10 : HOOP_Y + 100;
+    const arcPeak = Math.min(startPos.y, HOOP_Y) - 140;
 
-    // Determine target hoop (P1 shoots at right hoop, P2 at left)
-    const targetX = shooter === 'p1' ? HOOP_RIGHT_X : HOOP_LEFT_X;
-    const targetY = HOOP_Y;
-    const startPos = shooter === 'p1' ? BALL_START_P1 : BALL_START_P2;
+    const ball = this.ball;
 
-    // Animate ball arc
-    const duration = result.scored ? 800 : 600;
-    const endX = result.scored ? targetX : targetX + (shooter === 'p1' ? 60 : -60);
-    const endY = result.scored ? targetY + 20 : targetY + 80;
-
-    // Bezier arc using Phaser tweens with a timeline
-    const ballObj = this.ball;
-    const arcPeak = Math.min(startPos.y, targetY) - 120;
-
-    // Timeline of tweens for arc
+    // Arc tween — up
     this.tweens.add({
-      targets: ballObj,
-      duration: Math.round(duration * 0.5),
+      targets: ball,
+      duration: Math.round(duration * 0.45),
       x: (startPos.x + targetX) / 2,
       y: arcPeak,
       ease: 'Quad.easeOut',
       onComplete: () => {
+        // Arc tween — down
         this.tweens.add({
-          targets: ballObj,
-          duration: Math.round(duration * 0.5),
+          targets: ball,
+          duration: Math.round(duration * 0.55),
           x: endX,
           y: endY,
           ease: 'Quad.easeIn',
-          onUpdate: (t) => { ballObj.angle += 12; },
-          onComplete: () => {
-            this._onBallLanded(shooter, result);
-          }
+          onComplete: () => this._onBallLanded(shooter, result)
         });
       }
     });
+
+    // Shadow follows ball on ground (lerps to hoop)
+    if (this.ballShadow) {
+      this.tweens.add({
+        targets: this.ballShadow,
+        x: endX,
+        y: PLAYER_Y - 10,
+        scaleX: 0.4,
+        duration: duration,
+        ease: 'Linear'
+      });
+    }
   }
 
   _onBallLanded(shooter, result) {
+    if (this.ballShadow) this.ballShadow.setAlpha(0);
+    // Stop spin animation
+    if (this.ball.stop) this.ball.stop();
+
     if (result.scored) {
-      // Score!
-      if (shooter === 'p1') {
+      const isP1 = shooter === 'p1';
+
+      // Glow effect at hoop
+      this._showBallGlow(result.scored ? (isP1 ? HOOP_RIGHT_X : HOOP_LEFT_X) : 0);
+
+      if (isP1) {
         this.p1.score += result.points;
         this.events.emit('p1-scored', { points: result.points, score: this.p1.score, zone: result.zone });
-        this._playAnim(this.playerP1, 'p1_celebrate');
-        this._playAnim(this.playerP2, 'p2_disappoint');
-        this._showBasketFlash(HOOP_RIGHT_X, HOOP_Y);
+        this._setPlayerSprite(this.playerP1, 'p1_happy');
+        this._setPlayerSprite(this.playerP2, 'p2_sad');
       } else {
         this.p2.score += result.points;
         this.events.emit('p2-scored', { points: result.points, score: this.p2.score, zone: result.zone });
-        this._playAnim(this.playerP2, 'p2_celebrate');
-        this._playAnim(this.playerP1, 'p1_disappoint');
-        this._showBasketFlash(HOOP_LEFT_X, HOOP_Y);
+        this._setPlayerSprite(this.playerP2, 'p2_happy');
+        this._setPlayerSprite(this.playerP1, 'p1_sad');
       }
-      if (window.gameAudio) window.gameAudio.playBasket();
+
+      window.gameAudio?.playBasket?.();
       this.events.emit('shot-result', { scorer: shooter, result });
     } else {
-      // Miss
-      if (window.gameAudio) window.gameAudio.playMiss();
+      window.gameAudio?.playMiss?.();
       this.events.emit('shot-miss', { shooter, result });
-      this._playAnim(this.playerP1, 'p1_idle');
-      this._playAnim(this.playerP2, 'p2_idle');
+      this._setPlayerSprite(this.playerP1, 'p1_idle');
+      this._setPlayerSprite(this.playerP2, 'p2_idle');
     }
 
-    // Reset ball
-    this.time.delayedCall(600, () => {
+    this.time.delayedCall(700, () => {
       this.ball.setAlpha(0);
       this._enterBuffer();
     });
   }
 
   _playCPUShotSequence() {
-    // CPU auto-shoots with random power (simulating skill)
-    const power = Phaser.Math.Between(45, 100);
-    const zone = this.shotMechanic.getZone(power);
+    // CPU auto-shoot
+    const power = Phaser.Math.Between(50, 98);
+    const zone  = this.shotMechanic.getZone(power);
     const scored = Math.random() <= zone.probability;
     const points = scored ? zone.points : 0;
 
-    // Show ball briefly
     this.ball.setAlpha(1);
-    this.ball.x = BALL_START_P2.x;
-    this.ball.y = BALL_START_P2.y;
-    this._playAnim(this.playerP2, 'p2_shoot');
+    this.ball.x = BALL_P2.x;
+    this.ball.y = BALL_P2.y;
+    this.ball.angle = 0;
+    if (this.ballShadow) this.ballShadow.setPosition(BALL_P2.x, PLAYER_Y - 10).setAlpha(0.5);
+    this._setPlayerSprite(this.playerP2, 'p2_throw');
 
-    this.time.delayedCall(400, () => {
-      if (window.gameAudio) window.gameAudio.playWhoosh();
+    this.time.delayedCall(380, () => {
+      window.gameAudio?.playWhoosh?.();
       this._executeShotResult('p2', { scored, points, zone: zone.name, label: zone.label, color: zone.color });
     });
   }
 
-  _showBasketFlash(x, y) {
-    // Green ring flash at the hoop
+  _showBallGlow(x) {
+    if (!this.ballGlow || !x) return;
+    this.ballGlow.setPosition(x, HOOP_Y);
+    this.ballGlow.setAlpha(0.9);
     this.tweens.add({
-      targets: this.flashGraphics,
-      alpha: { from: 0.8, to: 0 },
-      duration: 500,
-      onUpdate: (t) => {
-        this.flashGraphics.clear();
-        this.flashGraphics.lineStyle(8, 0x22C55E, this.flashGraphics.alpha);
-        this.flashGraphics.strokeCircle(x, y, 40 + t.progress * 30);
-      }
+      targets: this.ballGlow,
+      alpha: 0,
+      scale: 1.6,
+      duration: 700,
+      ease: 'Quad.easeOut'
     });
   }
 
-  // ── Buffer ───────────────────────────────────────────────── //
+  // ── Buffer ─────────────────────────────────────────────── //
 
   _enterBuffer() {
     this.state = STATE.BUFFER;
-    this._playAnim(this.playerP1, 'p1_idle');
-    this._playAnim(this.playerP2, 'p2_idle');
+
+    // Return players to idle
+    this._setPlayerSprite(this.playerP1, 'p1_idle');
+    this._setPlayerSprite(this.playerP2, 'p2_idle');
 
     // Check win conditions
     if (this.gameMode !== 'flat') {
       if (this.p1.lives <= 0 || this.p2.lives <= 0) {
-        this.time.delayedCall(800, () => this._endMatch());
+        this.time.delayedCall(900, () => this._endMatch());
         return;
       }
     }
 
-    this.time.delayedCall(800, () => this._nextProblem());
+    this.time.delayedCall(900, () => this._nextProblem());
   }
 
-  // ── Possession Display ───────────────────────────────────── //
+  // ── Possession ─────────────────────────────────────────── //
 
   _showPossession(player, text) {
-    const color = player === 'p1' ? '#E85D04' : '#1A6FBF';
-    this.events.emit('show-possession', { text, color });
+    this.events.emit('show-possession', {
+      text,
+      color: player === 'p1' ? '#FF8C3A' : '#4DA6FF'
+    });
   }
 
-  // ── Animations ───────────────────────────────────────────── //
+  // ── Flash ──────────────────────────────────────────────── //
 
-  _playAnim(sprite, key) {
-    if (!sprite || typeof sprite.play !== 'function') return;
-    try { sprite.play(key); } catch (e) {}
+  _flashScreen(hexColor, intensity = 0.25) {
+    // Camera flash using a screen overlay tween
+    const hex = parseInt(hexColor.replace('#', ''), 16);
+    this.cameras.main.flash(180, (hex >> 16) & 0xFF, (hex >> 8) & 0xFF, hex & 0xFF, false);
   }
 
-  // ── Flash Effects ─────────────────────────────────────────── //
-
-  _flashCorrect() {
-    this.cameras.main.flash(200, 34, 197, 94, false);
-  }
-
-  _flashWrong() {
-    this.cameras.main.shake(200, 0.006);
-    this.cameras.main.flash(150, 239, 68, 68, false);
-  }
-
-  // ── Match End ─────────────────────────────────────────────── //
+  // ── Match End ──────────────────────────────────────────── //
 
   _endMatch() {
     if (this.state === STATE.GAMEOVER) return;
     this.state = STATE.GAMEOVER;
 
-    if (window.gameAudio) window.gameAudio.stopMusic();
+    window.gameAudio?.stopMusic?.();
+    this._setPlayerSprite(this.playerP1, 'p1_idle');
+    this._setPlayerSprite(this.playerP2, 'p2_idle');
 
     // Determine winner
     let result;
@@ -705,34 +711,45 @@ export class PlayScene extends Phaser.Scene {
       result = 'lose';
     } else if (this.p2.lives <= 0) {
       result = 'win';
+    } else if (this.p1.score > this.p2.score) {
+      result = 'win';
+    } else if (this.p1.score < this.p2.score) {
+      result = 'lose';
     } else {
-      result = this.p1.score > this.p2.score ? 'win' :
-               this.p1.score < this.p2.score ? 'lose' : 'draw';
+      // Tiebreaker: faster average time wins
+      const p1Avg = this.p1.totalTime / Math.max(1, this.problemIndex);
+      const p2Avg = this.p2.totalTime / Math.max(1, this.problemIndex);
+      result = p1Avg <= p2Avg ? 'win' : 'lose';
     }
 
-    if (result === 'win') window.gameAudio && window.gameAudio.playVictory();
-    else if (result === 'lose') window.gameAudio && window.gameAudio.playDefeat();
+    // Update player sprites to win/lose state
+    if (result === 'win') {
+      this._setPlayerSprite(this.playerP1, 'p1_won');
+      this._setPlayerSprite(this.playerP2, 'p2_cry');
+      window.gameAudio?.playVictory?.();
+    } else if (result === 'lose') {
+      this._setPlayerSprite(this.playerP1, 'p1_cry');
+      this._setPlayerSprite(this.playerP2, 'p2_won');
+      window.gameAudio?.playDefeat?.();
+    }
 
     this.events.emit('game-over', {
       result,
-      p1Score: this.p1.score,
-      p2Score: this.p2.score,
-      accuracy: this.mathEngine.getAccuracy(),
-      problems: this.problemIndex,
-      streakMax: this.p1.streak
+      p1Score:   this.p1.score,
+      p2Score:   this.p2.score,
+      p1Name:    this.p1.name,
+      p2Name:    this.p2.name,
+      accuracy:  this.mathEngine.getAccuracy(),
+      problems:  this.problemIndex,
+      streakMax: this.p1.streak,
+      mode:      this.gameMode
     });
   }
 
-  // ── Update ───────────────────────────────────────────────── //
-
   update() {
-    try {
-      // Per-frame ball bobbing when idle on player
-      if (this.state === STATE.PROBLEM && this.ball && this.ball.alpha === 0) {
-        // nothing
-      }
-    } catch (e) {
-      console.error('PlayScene update error:', e);
+    // Subtle ball bobbing near player while in PROBLEM state
+    if (this.state === STATE.PROBLEM && this.ball && this.ball.alpha < 0.1) {
+      // nothing to animate while hidden
     }
   }
 }
