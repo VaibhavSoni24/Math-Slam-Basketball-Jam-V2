@@ -20,6 +20,7 @@ export class MenuScene extends Phaser.Scene {
     const { width, height } = this.scale;
 
     if (!window.gameAudio) window.gameAudio = new AudioManager();
+    window.gameAudio?.stopMusic?.(); // Stop any playing match BGM when returning to Menu
     document.addEventListener('click', async () => { await window.gameAudio.init(); }, { once: true });
 
     // Restore persisted showOptions state

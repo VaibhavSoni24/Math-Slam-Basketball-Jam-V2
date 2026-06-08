@@ -1,86 +1,76 @@
 # Math Slam: Basketball Jam 🏀
 
-> "Solve it first. Shoot it fast. Win the court."
+Welcome to the repo for **Math Slam: Basketball Jam** — an educational arcade game built in Phaser 4, where fast math skills translate to deep three-pointers.
 
-A fast-paced educational arcade game for **Grades 3–6** built with **Phaser 4.1.0**. Race to solve math problems (multiplication, division, fractions) to earn basketball shots against CPU opponents.
+This document serves as the primary Workflow Documentation tracking how this game was conceptualized, built, and polished using an AI-assisted development pipeline. 
 
-## 🎮 How to Play
+---
 
-1. **Select Mode**: Solo (vs CPU), 2-Player (same device), or Practice
-2. **Select Level**: Varsity (Add/Sub), Pro (× ÷), or All-Star (Fractions)
-3. Click **▶ PLAY NOW**
-4. Solve the math problem by typing or tapping an answer
-5. **Answer correctly first** → earn possession + power bar appears
-6. Press **SPACE** or **ENTER** to release your shot at the right moment
-7. Hit the green zone (82–100%) for a guaranteed 3-pointer!
+## 🚀 AI-Assisted Development Workflow
 
-## 🔢 Math Topics
+Building this game required a highly parallelized workflow leveraging multiple AI models and specialized tools across different phases of the project. Here is the exact breakdown of the development process.
 
-| Level | Grades | Topics |
-|-------|--------|--------|
-| Varsity | 2–3 | 2-digit addition & subtraction |
-| ⭐ Pro | 3–4 | Multiplication facts, division |
-| All-Star | 5–6 | Fractions, decimals, mixed ops |
+### Phase 1: Conceptualization & Game Design Document (GDD)
+**Duration:** ~10 mins
+**Tool Used:** Claude 3.5 Sonnet (Web App)
 
-## 🚀 Running Locally
+The initial idea was born out of a prompt to create an engaging, highly competitive educational game that didn't feel like a standard "ed-tech quiz". 
 
-```bash
-npm run dev
-# Opens at http://localhost:8080
-```
+I fed Claude an initial prompt asking for an arcade-style mechanic:
+> *"I want to build an educational math game for grades 2-6. It shouldn't feel like a quiz. I want a sports theme—basketball. Players solve math problems rapidly, and answering correctly triggers a physical arcade mechanic, like a power-bar stopping in a green zone to shoot a hoop. Output a complete Game Design Document (GDD)."*
 
-Or:
-```bash
-python -m http.server 8080
-```
+Claude generated the comprehensive `Math_Slam_Basketball_Jam_GDD_v2.docx`, which served as the blueprint for the entire project.
 
-## 🏗️ Tech Stack
+### Phase 2: Parallel Tracks — Architecture & Asset Generation
+To accelerate development, we split the workflow into two parallel tracks: **Track A** (Code Architecture) and **Track B** (Asset Generation).
 
-- **Engine**: Phaser 4.1.0 (WebGL/Canvas, web browser)
-- **Language**: JavaScript ES Modules
-- **Styling**: Vanilla CSS (no framework)
-- **Math**: KaTeX for fraction rendering
-- **Audio**: Web Audio API (procedural — no audio files needed)
-- **Assets**: AI-generated sprites + canvas-drawn fallbacks
+#### Track A: Project Creation & Code Design
+**Duration:** ~30 mins
+**Tool Used:** Antigravity IDE (Powered by Claude 4.6 Sonnet)
 
-## 📁 Project Structure
+Using the newly minted GDD, I passed the documentation into the Antigravity IDE as a "Skill File" constraint.
+**Prompt to Antigravity:**
+> *"Read the attached GDD and Game-Dev-SF.md completely. Understand the concept, research the latest Phaser 4 tech stack, and create the complete game specifically compatible for web. Structure it modularly with separate scenes."*
 
-```
-├── index.html          ← Entry point
-├── main.js             ← Phaser config + scene boot
-├── style.css           ← HUD + UI styles
-├── assets/
-│   └── images/         ← Court, hoops, player sprites, ball
-└── src/
-    ├── scenes/
-    │   ├── BootScene.js     ← Asset loading
-    │   ├── MenuScene.js     ← Title + mode selection
-    │   ├── PlayScene.js     ← Core game loop
-    │   ├── HudScene.js      ← DOM HUD overlay
-    │   └── GameOverScene.js ← Results screen
-    └── game/
-        ├── MathEngine.js    ← Problem generator + adaptive difficulty
-        ├── CPUPlayer.js     ← CPU AI (Easy/Medium/Hard)
-        ├── ShotMechanic.js  ← Power bar + ball arc physics
-        └── AudioManager.js  ← Web Audio procedural sounds
-```
+Antigravity generated the entire Phaser boilerplates, the `MathEngine.js` for dynamic problem generation, the `ShotMechanic.js` for the oscillating power bar, and the decoupled DOM-based `HudScene` and `MenuScene` architectures. 
 
-## ✨ Features
+#### Track B: Asset Generation Pipeline
+**Duration:** ~30 mins(parallel to Track A)
+**Tools Used:** Ludo AI, ChatGPT (DALL-E 3), Suno AI
 
-- ✅ 3 game modes: Solo, 2-Player, Practice (flat)
-- ✅ 3 difficulty tiers with adaptive difficulty
-- ✅ CPU opponent with calibrated response speed
-- ✅ Power bar shot mechanic with 4 zones
-- ✅ Hot streak system (3+ consecutive wins)
-- ✅ KaTeX math rendering for fractions
-- ✅ Procedural audio (no files required)
-- ✅ Responsive letterbox scaling (1280×720)
+While Antigravity built the engine, I handled the asset pipeline.
+1. **Ludo AI (Initial Assets):** I used Ludo AI to generate the core sprites.
+   - *Call:* `/generate sprite "Chibi anime-style basketball player, orange jersey, idle stance, pixel art, transparent background"`
+   - *Call:* `/generate background "Indoor basketball court at night, dramatic lighting, pixel art style, 16:9"`
+2. **ChatGPT (Fallback):** Midway through sprite generation, my Ludo AI credits ran out. I immediately pivoted to ChatGPT using DALL-E 3 with strict prompts to match the existing pixel-art style for the remaining assets (UI elements, `ball_glow`, `player_blue` opponent).
+3. **Suno AI (Audio):** To give the game a premium arcade feel, I prompted Suno AI to generate the BGM:
+   - *Prompt:* *"Upbeat 16-bit arcade sports music, high energy, pumping bass, looping, no vocals."*
 
-## 🎯 GDD Compliance
+### Phase 3: Integration & Debugging
+**Duration:** ~20 mins
+**Tools Used:** Manual Debugging + Gemini 3.1 Pro
 
-Built following the **Math Slam: Basketball Jam GDD v2** specification:
-- Phaser 4 (^4.1.0) ✅
-- DOM HUD overlay (transparent center viewport) ✅  
-- Math-as-verb core mechanic ✅
-- All 3 modes (solo/vs-score/flat) ✅
-- Server-authoritative grading pattern (mocked locally) ✅
+Once the assets were dropped into the Antigravity-generated project, we entered the refinement phase. The initial integration had several UI alignment bugs (Phaser Canvas vs DOM overlay collisions) and game-loop race conditions.
+
+I partnered with Gemini 3.1 Pro to squash the remaining bugs:
+- Fixing the `court_bg` scaling letterbox issue using `Math.max()` dynamic scaling.
+- Rewriting the HUD's flexbox alignment so `.menu-fullpage` centered perfectly on ultra-wide monitors.
+- Squashing a race condition in `ShotMechanic.js` where overlapping `setInterval` timers caused the power bar to break the sound barrier.
+- Refining the CPU opponent logic so Practice Mode had a realistic 5-second thinking delay.
+
+---
+
+## 🛠 Deployment & Testing Checklist
+
+The project is currently configured to be hosted statically on **GitHub Pages**. 
+
+### The "One Thing to Double-Check" Rule ✅
+Before submitting or sharing the live link, we executed the final validation check:
+> *"Open the playable link in an incognito window on both desktop and mobile. Make sure it loads without you being logged in anywhere, the game actually starts, and it doesn't throw any console errors on load."*
+
+- **CORS / 404 Check:** `phaser.js` was migrated from a local `node_modules` import to the `cdn.jsdelivr.net` CDN to ensure it doesn't 404 when pushed to GitHub.
+- **Asset Paths:** All asset paths in `BootScene` use strict relative paths (`assets/images/`, `assets/audio/`).
+- **Responsive Canvas:** The Phaser scale manager is locked to `Phaser.Scale.FIT` to ensure flawless rendering on both Desktop and Mobile webviews.
+
+---
+*Documented by Vaibhav Soni — June 2026*
