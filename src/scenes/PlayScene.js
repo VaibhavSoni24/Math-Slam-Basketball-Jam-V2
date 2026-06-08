@@ -20,22 +20,24 @@ const STATE = {
   GAMEOVER:  'gameover'
 };
 
-// Layout constants (calibrated to court_bg which has hoops on each side)
-const P1_X          = 260;
-const P2_X          = 1020;
-const PLAYER_Y      = 580;   // feet on floor
-const PLAYER_W      = 180;
-const PLAYER_H      = 230;
+// Layout constants
+const P1_X      = 260;
+const P2_X      = 1020;
+const PLAYER_Y  = 630;   // feet on floor — shifted further down
+const PLAYER_W  = 190;
+const PLAYER_H  = 240;
 
-// Hoop rim center positions in court_bg image (1280×720)
-const HOOP_LEFT_X   = 280;
-const HOOP_RIGHT_X  = 1000;
-const HOOP_Y        = 300;
+// Hoop RING centers (calibrated to court_bg, 1280×720)
+// Left hoop: the orange ring is at roughly x=270, y=255
+// Right hoop: x=1010, y=255
+const HOOP_LEFT_X  = 268;
+const HOOP_RIGHT_X = 1012;
+const HOOP_Y       = 250;   // ring top — aim ball INTO the ring
 
-// Ball starting positions (in player's hands)
-const BALL_P1 = { x: P1_X + 80,  y: PLAYER_Y - 180 };
-const BALL_P2 = { x: P2_X - 80,  y: PLAYER_Y - 180 };
-const BALL_SIZE = 72;
+// Ball starting positions (off-screen, hidden until shot)
+const BALL_P1  = { x: P1_X + 60,  y: PLAYER_Y - 200 };
+const BALL_P2  = { x: P2_X - 60,  y: PLAYER_Y - 200 };
+const BALL_SIZE = 68;
 
 export class PlayScene extends Phaser.Scene {
   constructor() {
@@ -43,65 +45,59 @@ export class PlayScene extends Phaser.Scene {
   }
 
   init(data) {
-    this.gameMode   = data.mode || 'solo';
-    this.gameTier   = data.tier || 'pro';
+    this.gameMode  = data.mode     || 'solo';
+    this.gameTier  = data.tier     || 'pro';
+    this.showOptions = data.showOptions !== undefined ? data.showOptions : true;
+    this.p1Name    = data.p1Name   || 'YOU';
+    this.p2Name    = data.p2Name   || (this.gameMode === 'local2p' ? 'PLAYER 2' : 'CPU SHAQ');
 
-    this.state          = STATE.COUNTDOWN;
-    this.currentProblem = null;
-    this.problemIndex   = 0;
-    this.totalProblems  = this.gameMode === 'flat' ? 10 : Phaser.Math.Between(9, 12);
-    this.problemTimeLimit = this.gameMode === 'flat' ? 999 : 12;
+    this.state            = STATE.COUNTDOWN;
+    this.currentProblem   = null;
+    this.problemIndex     = 0;
+    this.totalProblems    = this.gameMode === 'flat' ? 10 : Phaser.Math.Between(9, 12);
+    this.problemTimeLimit = this.gameMode === 'flat' ? 999 : 10;
+    this.shotTimeLimit    = 10;
 
-    // Player state
-    this.p1 = { score: 0, lives: 3, streak: 0, totalTime: 0, name: 'YOU' };
-    this.p2 = {
-      score: 0, lives: 3, streak: 0, totalTime: 0,
-      name: this.gameMode === 'local2p' ? 'PLAYER 2' : 'CPU SHAQ'
-    };
+    // Player state — wrong-answer counter
+    this.p1 = { score: 0, lives: 3, streak: 0, totalTime: 0, wrongCount: 0, name: this.p1Name };
+    this.p2 = { score: 0, lives: 3, streak: 0, totalTime: 0, wrongCount: 0, name: this.p2Name };
 
-    // 2P turn system: alternate who answers first per problem
-    this.turnOwner       = 'p1'; // who answers this round (alternates in 2P)
-    this.p1Answered      = false;
-    this.p2Answered      = false;
+    // Turn / possession state
+    this.turnOwner        = 'p1';
+    this.p1Answered       = false;
+    this.p2Answered       = false;
     this.whoHasPossession = null;
     this.shotPhaseActive  = false;
+
+    // Timers
     this._problemTimerEvent = null;
-    this._shotTimeout       = null;
+    this._shotTimerEvent    = null;
+    this._timerCount        = 0;
+    this._timerRunning      = false;
   }
 
   create() {
-    // ── Canvas visuals ────────────────────────────────────── //
     this._createCourt();
     this._createPlayers();
     this._createBall();
     this._createShadow();
     this._createBallGlow();
 
-    // ── Engines ───────────────────────────────────────────── //
     this.mathEngine = new MathEngine();
     this.mathEngine.setTier(this.gameTier);
 
     this.cpu = new CPUPlayer();
-    this.cpu.setSpeedTier(
-      this.gameTier === 'varsity' ? 'easy' :
-      this.gameTier === 'pro'     ? 'medium' : 'hard'
-    );
+    this.cpu.setTier(this.gameTier);  // smarter CPU per grade
 
     this.shotMechanic = new ShotMechanic();
 
-    // ── Input ─────────────────────────────────────────────── //
     this._setupInput();
 
-    // ── Listen for HUD events ─────────────────────────────── //
-    this.events.on('player-answered',   this._onPlayerAnswered, this);
-    this.events.on('p2-player-answered',this._onP2PlayerAnswered, this);
+    this.events.on('player-answered',    this._onPlayerAnswered,   this);
+    this.events.on('p2-player-answered', this._onP2PlayerAnswered, this);
 
-    // ── Init audio ────────────────────────────────────────── //
-    if (window.gameAudio) {
-      window.gameAudio.init().catch(() => {});
-    }
+    if (window.gameAudio) window.gameAudio.init().catch(() => {});
 
-    // ── Start countdown ───────────────────────────────────── //
     this._startCountdown();
   }
 
@@ -111,56 +107,57 @@ export class PlayScene extends Phaser.Scene {
     const { width, height } = this.scale;
     if (this.textures.exists('court_bg')) {
       this.add.image(width / 2, height / 2, 'court_bg')
-        .setDisplaySize(width, height)
-        .setDepth(0);
+        .setDisplaySize(width, height).setDepth(0);
     } else {
       const g = this.add.graphics();
       g.fillGradientStyle(0x0a0a1e, 0x0a0a1e, 0x1A1A2E, 0x0F2040, 1);
       g.fillRect(0, 0, width, height);
-      // Simple court floor
       g.fillStyle(0xC8864E, 0.8);
       g.fillRect(0, H - 200, width, 200);
     }
   }
 
+  // ── Players ─────────────────────────────────────────────── //
+
   _createPlayers() {
     const p1Key = this.textures.exists('p1_idle') ? 'p1_idle' : null;
     const p2Key = this.textures.exists('p2_idle') ? 'p2_idle' : null;
 
+    // P1 — faces right (flip horizontally so player looks toward center/hoop)
     if (p1Key) {
       this.playerP1 = this.add.image(P1_X, PLAYER_Y, p1Key)
         .setDisplaySize(PLAYER_W, PLAYER_H)
-        .setDepth(8)
-        .setOrigin(0.5, 1);
+        .setDepth(8).setOrigin(0.5, 1)
+        .setFlipX(true);  // face right toward hoop
     } else {
-      this.playerP1 = this._drawPlayerFallback(P1_X, PLAYER_Y, 0xE85D04, 'P1');
+      this.playerP1 = this._drawFallback(P1_X, PLAYER_Y, 0xE85D04, 'P1');
     }
 
+    // P2 — original orientation (already faces left toward center)
     if (p2Key) {
       this.playerP2 = this.add.image(P2_X, PLAYER_Y, p2Key)
         .setDisplaySize(PLAYER_W, PLAYER_H)
-        .setDepth(8)
-        .setOrigin(0.5, 1)
-        .setFlipX(true);
+        .setDepth(8).setOrigin(0.5, 1);
+      // No flipX — original asset faces left toward center
     } else {
-      this.playerP2 = this._drawPlayerFallback(P2_X, PLAYER_Y, 0x1A6FBF, 'P2');
+      this.playerP2 = this._drawFallback(P2_X, PLAYER_Y, 0x1A6FBF, 'P2');
     }
 
-    // Player name labels
-    this.add.text(P1_X, PLAYER_Y + 12, this.p1.name, {
+    // Name tags
+    this._p1NameTag = this.add.text(P1_X, PLAYER_Y + 14, this.p1.name, {
       fontFamily: "'Nunito', sans-serif",
-      fontSize: 16, fontStyle: 'bold',
+      fontSize: 15, fontStyle: 'bold',
       color: '#FF8C3A', stroke: '#000', strokeThickness: 3
-    }).setOrigin(0.5).setDepth(9);
+    }).setOrigin(0.5, 0).setDepth(9);
 
-    this.add.text(P2_X, PLAYER_Y + 12, this.p2.name, {
+    this._p2NameTag = this.add.text(P2_X, PLAYER_Y + 14, this.p2.name, {
       fontFamily: "'Nunito', sans-serif",
-      fontSize: 16, fontStyle: 'bold',
+      fontSize: 15, fontStyle: 'bold',
       color: '#4DA6FF', stroke: '#000', strokeThickness: 3
-    }).setOrigin(0.5).setDepth(9);
+    }).setOrigin(0.5, 0).setDepth(9);
   }
 
-  _drawPlayerFallback(x, y, color, label) {
+  _drawFallback(x, y, color, label) {
     const g = this.add.graphics().setDepth(8);
     g.fillStyle(color, 1);
     g.fillCircle(x, y - 80, 24);
@@ -169,25 +166,21 @@ export class PlayScene extends Phaser.Scene {
   }
 
   _setPlayerSprite(player, key) {
-    // player = this.playerP1 or this.playerP2
     if (!player || typeof player.setTexture !== 'function') return;
-    if (this.textures.exists(key)) {
-      player.setTexture(key);
-    }
+    if (this.textures.exists(key)) player.setTexture(key);
   }
 
+  // ── Ball ─────────────────────────────────────────────────── //
+
   _createBall() {
-    // Use spinning spritesheet if available; fall back to idle image
     if (this.textures.exists('ball_spin')) {
       this.ball = this.add.sprite(BALL_P1.x, BALL_P1.y, 'ball_spin', 0)
         .setDisplaySize(BALL_SIZE, BALL_SIZE)
-        .setDepth(12)
-        .setAlpha(0);
+        .setDepth(12).setAlpha(0);
     } else if (this.textures.exists('ball_idle')) {
       this.ball = this.add.image(BALL_P1.x, BALL_P1.y, 'ball_idle')
         .setDisplaySize(BALL_SIZE, BALL_SIZE)
-        .setDepth(12)
-        .setAlpha(0);
+        .setDepth(12).setAlpha(0);
     } else {
       const g = this.add.graphics().setDepth(12).setAlpha(0);
       g.fillStyle(0xE8651A, 1);
@@ -201,25 +194,20 @@ export class PlayScene extends Phaser.Scene {
   _createShadow() {
     if (this.textures.exists('ball_shadow')) {
       this.ballShadow = this.add.image(0, 0, 'ball_shadow')
-        .setDisplaySize(60, 20)
-        .setDepth(7)
-        .setAlpha(0);
+        .setDisplaySize(60, 20).setDepth(7).setAlpha(0);
     }
   }
 
   _createBallGlow() {
     if (this.textures.exists('ball_glow')) {
       this.ballGlow = this.add.image(0, 0, 'ball_glow')
-        .setDisplaySize(120, 120)
-        .setDepth(13)
-        .setAlpha(0);
+        .setDisplaySize(110, 110).setDepth(13).setAlpha(0);
     }
   }
 
-  // ── Input Setup ──────────────────────────────────────────── //
+  // ── Input ─────────────────────────────────────────────────── //
 
   _setupInput() {
-    // P1: Space or Enter releases shot
     this.input.keyboard.on('keydown-SPACE', () => {
       if (this.state === STATE.SHOT && this.whoHasPossession === 'p1') {
         this._releaseShotP1();
@@ -236,13 +224,8 @@ export class PlayScene extends Phaser.Scene {
 
   _startCountdown() {
     this.state = STATE.COUNTDOWN;
-
     let el = document.getElementById('countdown-overlay');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'countdown-overlay';
-      document.body.appendChild(el);
-    }
+    if (!el) { el = document.createElement('div'); el.id = 'countdown-overlay'; document.body.appendChild(el); }
     el.className = 'show';
 
     let count = 3;
@@ -270,44 +253,38 @@ export class PlayScene extends Phaser.Scene {
   // ── Problem Cycle ──────────────────────────────────────────── //
 
   _nextProblem() {
-    if (this.problemIndex >= this.totalProblems) {
-      this._endMatch();
-      return;
-    }
+    if (this.problemIndex >= this.totalProblems) { this._endMatch(); return; }
 
-    this.state         = STATE.PROBLEM;
-    this.p1Answered    = false;
-    this.p2Answered    = false;
+    this.state            = STATE.PROBLEM;
+    this.p1Answered       = false;
+    this.p2Answered       = false;
     this.whoHasPossession = null;
     this.shotPhaseActive  = false;
     this.problemIndex++;
 
-    // Alternate who answers first in 2P mode
     if (this.gameMode === 'local2p') {
       this.turnOwner = this.problemIndex % 2 === 1 ? 'p1' : 'p2';
     } else {
-      this.turnOwner = 'p1'; // P1 always answers in solo/flat
+      this.turnOwner = 'p1';
     }
 
-    // Generate problem
-    this.currentProblem = this.mathEngine.generateProblem();
+    this.currentProblem  = this.mathEngine.generateProblem();
     this._roundStartTime = Date.now();
 
-    // Notify HUD
     this.events.emit('new-problem', {
-      problem:   this.currentProblem,
-      index:     this.problemIndex,
-      total:     this.totalProblems,
-      timeLimit: this.problemTimeLimit,
-      turnOwner: this.turnOwner,
-      mode:      this.gameMode
+      problem:     this.currentProblem,
+      index:       this.problemIndex,
+      total:       this.totalProblems,
+      timeLimit:   this.problemTimeLimit,
+      turnOwner:   this.turnOwner,
+      mode:        this.gameMode,
+      showOptions: this.showOptions
     });
 
-    // Player sprites — focus pose
     this._setPlayerSprite(this.playerP1, 'p1_idle');
     this._setPlayerSprite(this.playerP2, 'p2_idle');
 
-    // CPU answers in solo/flat mode
+    // CPU schedules its answer (solo / flat)
     if (this.gameMode !== 'local2p') {
       this.cpu.scheduleProblem(this.currentProblem, this.problemTimeLimit, (isCorrect, timeTaken, timedOut) => {
         if (!this.p2Answered && this.state === STATE.PROBLEM) {
@@ -316,14 +293,27 @@ export class PlayScene extends Phaser.Scene {
       });
     }
 
-    // Problem timer
-    let timerCount = 0;
+    // PROBLEM TIMER — never stops due to wrong answers
+    this._startProblemTimer(this.problemTimeLimit);
+  }
+
+  // ── Timer helpers ─────────────────────────────────────────── //
+
+  _startProblemTimer(seconds) {
+    // Remove any existing timer
+    if (this._problemTimerEvent) { this._problemTimerEvent.remove(false); this._problemTimerEvent = null; }
+
+    this._timerCount   = 0;
+    this._timerRunning = true;
+    const total        = seconds;
+
     this._problemTimerEvent = this.time.addEvent({
       delay: 1000,
-      repeat: this.problemTimeLimit - 1,
+      repeat: total,          // will fire total+1 times
       callback: () => {
-        timerCount++;
-        const remaining = this.problemTimeLimit - timerCount;
+        if (!this._timerRunning) return;
+        this._timerCount++;
+        const remaining = total - this._timerCount;
         this.events.emit('timer-tick', remaining);
         if (remaining <= 5 && remaining > 0) window.gameAudio?.playUrgentTick?.();
         if (remaining <= 0) this._onProblemTimeout();
@@ -331,42 +321,62 @@ export class PlayScene extends Phaser.Scene {
     });
   }
 
+  _stopProblemTimer() {
+    this._timerRunning = false;
+    if (this._problemTimerEvent) { this._problemTimerEvent.remove(false); this._problemTimerEvent = null; }
+  }
+
+  _startShotTimer() {
+    if (this._shotTimerEvent) { this._shotTimerEvent.remove(false); this._shotTimerEvent = null; }
+    let shotCount = 0;
+    const total   = this.shotTimeLimit;
+
+    this._shotTimerEvent = this.time.addEvent({
+      delay: 1000,
+      repeat: total,
+      callback: () => {
+        shotCount++;
+        const remaining = total - shotCount;
+        this.events.emit('shot-timer-tick', remaining);
+        if (remaining <= 0 && this.state === STATE.SHOT) {
+          // Force shot
+          if (this._shotTimerEvent) { this._shotTimerEvent.remove(false); this._shotTimerEvent = null; }
+          const result = this.shotMechanic.timeout();
+          this._executeShotResult(this.whoHasPossession, result);
+        }
+      }
+    });
+  }
+
+  _stopShotTimer() {
+    if (this._shotTimerEvent) { this._shotTimerEvent.remove(false); this._shotTimerEvent = null; }
+  }
+
   // ── Answer Handling ──────────────────────────────────────── //
 
-  // P1 (player 1 / human solo)
   _onPlayerAnswered(userAnswer) {
     if (this.state !== STATE.PROBLEM) return;
     if (this.p1Answered) return;
-
-    // In 2P mode, only process if it's P1's turn
     if (this.gameMode === 'local2p' && this.turnOwner !== 'p1') return;
 
-    this.p1Answered = true;
     const timeTaken = (Date.now() - this._roundStartTime) / 1000;
-    this.p1.totalTime += timeTaken;
-
-    if (this._problemTimerEvent) this._problemTimerEvent.remove();
-    this.cpu.cancelProblem();
-
-    const verdict = this.mathEngine.submitAttempt(
-      userAnswer, this.currentProblem, this.p1.lives, this.p1.score
-    );
+    const verdict = this.mathEngine.submitAttempt(userAnswer, this.currentProblem, this.p1.lives, this.p1.score);
 
     if (verdict.correct) {
-      this.p1.score  += verdict.score_delta;
-      this.p1.streak  = verdict.streak;
+      this.p1Answered    = true;
+      this.p1.score     += verdict.score_delta;
+      this.p1.streak     = verdict.streak;
+      this.p1.totalTime += timeTaken;
+      this.p1.wrongCount = 0; // reset wrong streak on correct
       this.whoHasPossession = 'p1';
+
+      this._stopProblemTimer();
+      this.cpu.cancelProblem();
       window.gameAudio?.playCorrect?.();
 
-      this.events.emit('p1-verdict', {
-        correct: true, score: this.p1.score,
-        streak:  this.p1.streak, delta: verdict.score_delta
-      });
-
+      this.events.emit('p1-verdict', { correct: true, score: this.p1.score, streak: this.p1.streak, delta: verdict.score_delta });
       if (this.gameMode === 'local2p') {
-        // In 2P mode, the other player (P2) now gets a shot chance too
-        // But P1 answered first correctly → P1 gets possession
-        this.events.emit('p2-status', 'P1 answered first!');
+        this.events.emit('p2-status', 'P1 was faster!');
       } else {
         this.events.emit('p2-status', 'Too slow! 😅');
       }
@@ -381,158 +391,194 @@ export class PlayScene extends Phaser.Scene {
 
       this._startShotPhase('p1');
     } else {
-      // Wrong answer — allow retry
-      this.p1Answered = false;
+      // WRONG — count wrong answers, deduct life
+      this.p1.wrongCount++;
       window.gameAudio?.playWrong?.();
       this._flashScreen('#EF4444', 0.15);
+
+      if (this.gameMode !== 'flat') {
+        this.p1.lives = Math.max(0, this.p1.lives - 1);
+        this.events.emit('p1-lost-life', this.p1.lives);
+      }
+
       this.events.emit('p1-verdict', { correct: false, score: this.p1.score, streak: 0 });
+
+      // 3 wrong = instant loss
+      if (this.p1.lives <= 0 && this.gameMode !== 'flat') {
+        this._stopProblemTimer();
+        this.cpu.cancelProblem();
+        this.time.delayedCall(600, () => this._endMatch());
+        return;
+      }
+
+      // Timer KEEPS RUNNING — just allow retry
       this.events.emit('allow-retry', {});
     }
   }
 
-  // P2 human (local 2P mode)
   _onP2PlayerAnswered(userAnswer) {
     if (this.state !== STATE.PROBLEM) return;
     if (this.p2Answered) return;
     if (this.gameMode !== 'local2p') return;
     if (this.turnOwner !== 'p2') return;
 
-    this.p2Answered = true;
     const timeTaken = (Date.now() - this._roundStartTime) / 1000;
-    this.p2.totalTime += timeTaken;
-
-    if (this._problemTimerEvent) this._problemTimerEvent.remove();
-
-    const verdict = this.mathEngine.submitAttempt(
-      userAnswer, this.currentProblem, this.p2.lives, this.p2.score
-    );
+    const verdict = this.mathEngine.submitAttempt(userAnswer, this.currentProblem, this.p2.lives, this.p2.score);
 
     if (verdict.correct) {
-      this.p2.score  += verdict.score_delta;
-      this.p2.streak  = verdict.streak;
+      this.p2Answered    = true;
+      this.p2.score     += verdict.score_delta;
+      this.p2.streak     = verdict.streak;
+      this.p2.totalTime += timeTaken;
+      this.p2.wrongCount = 0;
       this.whoHasPossession = 'p2';
+
+      this._stopProblemTimer();
       window.gameAudio?.playCorrect?.();
 
-      this.events.emit('p2-verdict', {
-        correct: true, score: this.p2.score,
-        streak:  this.p2.streak, delta: verdict.score_delta
-      });
-      this.events.emit('p1-status', 'P2 answered first!');
+      this.events.emit('p2-verdict', { correct: true, score: this.p2.score, streak: this.p2.streak, delta: verdict.score_delta });
+      this.events.emit('p1-status', 'P2 was faster!');
       this._showPossession('p2', 'P2 GOT IT! 🏀');
       this._flashScreen('#4DA6FF', 0.15);
-      this._playCPUShotSequence(); // P2 shoots
+      this._playCPUShotSequence();
     } else {
-      this.p2Answered = false;
+      this.p2.wrongCount++;
       window.gameAudio?.playWrong?.();
+
+      if (this.gameMode !== 'flat') {
+        this.p2.lives = Math.max(0, this.p2.lives - 1);
+        this.events.emit('p2-lost-life', this.p2.lives);
+      }
+
       this.events.emit('p2-verdict', { correct: false, score: this.p2.score, streak: 0 });
+
+      if (this.p2.lives <= 0 && this.gameMode !== 'flat') {
+        this._stopProblemTimer();
+        this.time.delayedCall(600, () => this._endMatch());
+        return;
+      }
+
       this.events.emit('allow-p2-retry', {});
     }
   }
 
-  // CPU answers
   _onCPUAnswered(isCorrect, timedOut) {
     if (this.state !== STATE.PROBLEM || this.p1Answered) return;
-
-    if (timedOut) {
-      this.events.emit('p2-status', 'Thinking...');
-      return;
-    }
+    if (timedOut) { this.events.emit('p2-status', 'Thinking...'); return; }
 
     this.p2Answered = true;
-    if (this._problemTimerEvent) this._problemTimerEvent.remove();
+    this._stopProblemTimer();
 
     if (isCorrect) {
       this.p2.score  += 10;
       this.p2.streak += 1;
       this.whoHasPossession = 'p2';
-
       this.events.emit('p2-verdict', { correct: true, score: this.p2.score, streak: this.p2.streak });
       this.events.emit('p1-status', 'CPU was faster!');
       this._showPossession('p2', 'CPU SNATCHES IT!');
       this._playCPUShotSequence();
     } else {
       this.p2.streak = 0;
+      this.events.emit('p2-verdict', { correct: false, score: this.p2.score, streak: 0 });
       this.events.emit('p2-status', 'CPU missed...');
+      // Timer already stopped — go to next problem
+      this.time.delayedCall(800, () => {
+        if (this.state === STATE.PROBLEM) this._enterBuffer();
+      });
     }
   }
 
   _onProblemTimeout() {
     if (this.state !== STATE.PROBLEM) return;
+    this._timerRunning = false;
     this.cpu.cancelProblem();
 
-    // Lose life if not already answered
-    if (!this.p1Answered && this.gameMode !== 'flat') {
-      this.p1.lives = Math.max(0, this.p1.lives - 1);
-      this.events.emit('p1-lost-life', this.p1.lives);
+    // CPU auto-answers correctly if P1 hasn't (solo mode)
+    if (!this.p1Answered && !this.p2Answered && this.gameMode !== 'local2p') {
+      // CPU steals possession on timeout
+      this.p2Answered = true;
+      this.p2.score += 10;
+      this.p2.streak += 1;
+      this.whoHasPossession = 'p2';
+      this.events.emit('p2-verdict', { correct: true, score: this.p2.score, streak: this.p2.streak });
+      this.events.emit('p1-status', 'Too slow! CPU steals!');
+      this._showPossession('p2', 'CPU STEALS! ⚡');
+      this.events.emit('timeout');
+      this.events.emit('reveal-answer', { answer: this.currentProblem.answer });
+      this.time.delayedCall(600, () => this._playCPUShotSequence());
+      return;
     }
-    if (!this.p2Answered && this.gameMode !== 'flat') {
-      this.p2.lives = Math.max(0, this.p2.lives - 1);
-      this.events.emit('p2-lost-life', this.p2.lives);
+
+    // In 2P mode — both timed out
+    if (this.gameMode !== 'flat') {
+      if (!this.p1Answered) {
+        this.p1.lives = Math.max(0, this.p1.lives - 1);
+        this.events.emit('p1-lost-life', this.p1.lives);
+      }
+      if (!this.p2Answered) {
+        this.p2.lives = Math.max(0, this.p2.lives - 1);
+        this.events.emit('p2-lost-life', this.p2.lives);
+      }
     }
 
     this.events.emit('timeout');
     this.events.emit('reveal-answer', { answer: this.currentProblem.answer });
 
-    // Check elimination
     if (this.p1.lives <= 0 || (this.p2.lives <= 0 && this.gameMode !== 'flat')) {
-      this.time.delayedCall(1400, () => this._endMatch());
+      this.time.delayedCall(1200, () => this._endMatch());
       return;
     }
-
-    this.time.delayedCall(1400, () => this._nextProblem());
+    this.time.delayedCall(1200, () => this._nextProblem());
   }
 
   // ── Shot Phase ──────────────────────────────────────────── //
 
   _startShotPhase(shooter) {
-    this.state = STATE.SHOT;
+    this.state       = STATE.SHOT;
     this.shotPhaseActive = true;
 
-    // Show ball at shooter's position
-    const pos = shooter === 'p1' ? BALL_P1 : BALL_P2;
-    this.ball.x = pos.x;
-    this.ball.y = pos.y;
-    this.ball.angle = 0;
-    this.ball.setAlpha(1);
+    // Ball stays HIDDEN until player actually presses SPACE/ENTER
+    // (ball.alpha stays 0 here — only shown in _releaseShotP1 / CPU shot)
 
-    // Play spin animation if it's a sprite
-    if (this.ball.play && this.anims.exists('ball_spin_anim')) {
-      this.ball.play('ball_spin_anim');
-    }
-
-    // Shadow
-    if (this.ballShadow) {
-      this.ballShadow.setPosition(pos.x, PLAYER_Y - 10);
-      this.ballShadow.setAlpha(0.5);
-    }
-
-    // Switch to throw sprite
     if (shooter === 'p1') {
       this._setPlayerSprite(this.playerP1, 'p1_throw');
     } else {
       this._setPlayerSprite(this.playerP2, 'p2_throw');
     }
 
-    // Start power bar
+    // Start power bar oscillating
     this.shotMechanic.start((power, zone) => {
       this.events.emit('power-update', { power, zone });
     });
 
     this.events.emit('shot-phase-start', { shooter });
 
-    // Auto-timeout after 4.5s
-    this._shotTimeout = this.time.delayedCall(4500, () => {
-      if (this.state === STATE.SHOT) {
-        const result = this.shotMechanic.timeout();
-        this._executeShotResult(shooter, result);
-      }
-    });
+    // Start shot timer (10s to throw)
+    this._startShotTimer();
   }
 
   _releaseShotP1() {
     if (!this.shotMechanic.isActive) return;
-    if (this._shotTimeout) this._shotTimeout.remove();
+    this._stopShotTimer();
+
     const result = this.shotMechanic.release();
+
+    // NOW show ball at P1's throw position
+    const pos = BALL_P1;
+    this.ball.x = pos.x;
+    this.ball.y = pos.y;
+    this.ball.angle = 0;
+    this.ball.setAlpha(1);
+
+    if (this.ball.play && this.anims.exists('ball_spin_anim')) {
+      this.ball.play('ball_spin_anim');
+    }
+
+    if (this.ballShadow) {
+      this.ballShadow.setPosition(pos.x, PLAYER_Y - 20);
+      this.ballShadow.setAlpha(0.5);
+    }
+
     this._executeShotResult('p1', result);
   }
 
@@ -542,59 +588,58 @@ export class PlayScene extends Phaser.Scene {
     this.events.emit('shot-phase-end');
     window.gameAudio?.playWhoosh?.();
 
-    const isP1  = shooter === 'p1';
-    const targetX = isP1 ? HOOP_RIGHT_X : HOOP_LEFT_X;
+    const isP1     = shooter === 'p1';
+    // P1 shoots toward RIGHT hoop; P2 shoots toward LEFT hoop
+    const targetX  = isP1 ? HOOP_RIGHT_X : HOOP_LEFT_X;
     const startPos = isP1 ? BALL_P1 : BALL_P2;
-    const duration = result.scored ? 900 : 700;
-    const endX = result.scored ? targetX : targetX + (isP1 ? 80 : -80);
-    const endY = result.scored ? HOOP_Y + 10 : HOOP_Y + 100;
-    const arcPeak = Math.min(startPos.y, HOOP_Y) - 140;
+
+    // For a SCORED shot → ball goes into the ring hole exactly
+    // For a MISS → ball veers past / short
+    const duration = result.scored ? 950 : 720;
+    const endX     = result.scored ? targetX : targetX + (isP1 ? 90 : -90);
+    const endY     = result.scored ? HOOP_Y - 5 : HOOP_Y + 120;
+    const arcPeak  = Math.min(startPos.y, HOOP_Y) - 160;
 
     const ball = this.ball;
 
-    // Arc tween — up
+    // Phase 1 — rise to peak
     this.tweens.add({
-      targets: ball,
-      duration: Math.round(duration * 0.45),
-      x: (startPos.x + targetX) / 2,
-      y: arcPeak,
-      ease: 'Quad.easeOut',
+      targets:  ball,
+      duration: Math.round(duration * 0.44),
+      x:        (startPos.x + targetX) / 2,
+      y:        arcPeak,
+      ease:     'Quad.easeOut',
       onComplete: () => {
-        // Arc tween — down
+        // Phase 2 — fall to hoop
         this.tweens.add({
-          targets: ball,
-          duration: Math.round(duration * 0.55),
-          x: endX,
-          y: endY,
-          ease: 'Quad.easeIn',
+          targets:  ball,
+          duration: Math.round(duration * 0.56),
+          x:        endX,
+          y:        endY,
+          ease:     'Quad.easeIn',
           onComplete: () => this._onBallLanded(shooter, result)
         });
       }
     });
 
-    // Shadow follows ball on ground (lerps to hoop)
+    // Shadow
     if (this.ballShadow) {
       this.tweens.add({
         targets: this.ballShadow,
-        x: endX,
-        y: PLAYER_Y - 10,
-        scaleX: 0.4,
-        duration: duration,
-        ease: 'Linear'
+        x: endX, y: PLAYER_Y - 20,
+        scaleX: 0.35,
+        duration, ease: 'Linear'
       });
     }
   }
 
   _onBallLanded(shooter, result) {
     if (this.ballShadow) this.ballShadow.setAlpha(0);
-    // Stop spin animation
     if (this.ball.stop) this.ball.stop();
 
     if (result.scored) {
       const isP1 = shooter === 'p1';
-
-      // Glow effect at hoop
-      this._showBallGlow(result.scored ? (isP1 ? HOOP_RIGHT_X : HOOP_LEFT_X) : 0);
+      this._showBallGlow(isP1 ? HOOP_RIGHT_X : HOOP_LEFT_X);
 
       if (isP1) {
         this.p1.score += result.points;
@@ -624,18 +669,26 @@ export class PlayScene extends Phaser.Scene {
   }
 
   _playCPUShotSequence() {
-    // CPU auto-shoot
-    const power = Phaser.Math.Between(50, 98);
-    const zone  = this.shotMechanic.getZone(power);
+    // CPU throws — show ball immediately when CPU shoots
+    const power  = Phaser.Math.Between(48, 98);
+    const zone   = this.shotMechanic.getZone(power);
     const scored = Math.random() <= zone.probability;
     const points = scored ? zone.points : 0;
 
-    this.ball.setAlpha(1);
-    this.ball.x = BALL_P2.x;
-    this.ball.y = BALL_P2.y;
-    this.ball.angle = 0;
-    if (this.ballShadow) this.ballShadow.setPosition(BALL_P2.x, PLAYER_Y - 10).setAlpha(0.5);
     this._setPlayerSprite(this.playerP2, 'p2_throw');
+
+    // Show ball at CPU's position right before arc
+    const pos = BALL_P2;
+    this.ball.x = pos.x;
+    this.ball.y = pos.y;
+    this.ball.angle = 0;
+    this.ball.setAlpha(1);
+
+    if (this.ball.play && this.anims.exists('ball_spin_anim')) {
+      this.ball.play('ball_spin_anim');
+    }
+
+    if (this.ballShadow) this.ballShadow.setPosition(pos.x, PLAYER_Y - 20).setAlpha(0.5);
 
     this.time.delayedCall(380, () => {
       window.gameAudio?.playWhoosh?.();
@@ -647,48 +700,34 @@ export class PlayScene extends Phaser.Scene {
     if (!this.ballGlow || !x) return;
     this.ballGlow.setPosition(x, HOOP_Y);
     this.ballGlow.setAlpha(0.9);
-    this.tweens.add({
-      targets: this.ballGlow,
-      alpha: 0,
-      scale: 1.6,
-      duration: 700,
-      ease: 'Quad.easeOut'
-    });
+    this.tweens.add({ targets: this.ballGlow, alpha: 0, scale: 1.6, duration: 700, ease: 'Quad.easeOut' });
   }
 
   // ── Buffer ─────────────────────────────────────────────── //
 
   _enterBuffer() {
     this.state = STATE.BUFFER;
-
-    // Return players to idle
     this._setPlayerSprite(this.playerP1, 'p1_idle');
     this._setPlayerSprite(this.playerP2, 'p2_idle');
 
-    // Check win conditions
     if (this.gameMode !== 'flat') {
       if (this.p1.lives <= 0 || this.p2.lives <= 0) {
         this.time.delayedCall(900, () => this._endMatch());
         return;
       }
     }
-
     this.time.delayedCall(900, () => this._nextProblem());
   }
 
-  // ── Possession ─────────────────────────────────────────── //
+  // ── Helpers ───────────────────────────────────────────── //
 
   _showPossession(player, text) {
     this.events.emit('show-possession', {
-      text,
-      color: player === 'p1' ? '#FF8C3A' : '#4DA6FF'
+      text, color: player === 'p1' ? '#FF8C3A' : '#4DA6FF'
     });
   }
 
-  // ── Flash ──────────────────────────────────────────────── //
-
-  _flashScreen(hexColor, intensity = 0.25) {
-    // Camera flash using a screen overlay tween
+  _flashScreen(hexColor) {
     const hex = parseInt(hexColor.replace('#', ''), 16);
     this.cameras.main.flash(180, (hex >> 16) & 0xFF, (hex >> 8) & 0xFF, hex & 0xFF, false);
   }
@@ -699,11 +738,12 @@ export class PlayScene extends Phaser.Scene {
     if (this.state === STATE.GAMEOVER) return;
     this.state = STATE.GAMEOVER;
 
+    this._stopProblemTimer();
+    this._stopShotTimer();
+    this.shotMechanic.stop();
+    this.cpu.cancelProblem();
     window.gameAudio?.stopMusic?.();
-    this._setPlayerSprite(this.playerP1, 'p1_idle');
-    this._setPlayerSprite(this.playerP2, 'p2_idle');
 
-    // Determine winner
     let result;
     if (this.gameMode === 'flat') {
       result = 'complete';
@@ -716,13 +756,11 @@ export class PlayScene extends Phaser.Scene {
     } else if (this.p1.score < this.p2.score) {
       result = 'lose';
     } else {
-      // Tiebreaker: faster average time wins
       const p1Avg = this.p1.totalTime / Math.max(1, this.problemIndex);
       const p2Avg = this.p2.totalTime / Math.max(1, this.problemIndex);
       result = p1Avg <= p2Avg ? 'win' : 'lose';
     }
 
-    // Update player sprites to win/lose state
     if (result === 'win') {
       this._setPlayerSprite(this.playerP1, 'p1_won');
       this._setPlayerSprite(this.playerP2, 'p2_cry');
@@ -746,10 +784,5 @@ export class PlayScene extends Phaser.Scene {
     });
   }
 
-  update() {
-    // Subtle ball bobbing near player while in PROBLEM state
-    if (this.state === STATE.PROBLEM && this.ball && this.ball.alpha < 0.1) {
-      // nothing to animate while hidden
-    }
-  }
+  update() {}
 }

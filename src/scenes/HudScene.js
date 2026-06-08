@@ -1,6 +1,7 @@
 // ============================================================
-// HudScene.js — DOM HUD overlay (runs in parallel with PlayScene)
-// Manages: scores, timer, lives, input, power bar, game-over
+// HudScene.js — DOM HUD overlay (parallel with PlayScene)
+// Changes: streak LEFT, opponent RIGHT, shot timer, options toggle,
+//          "/" fraction parsing, wrong-answer life deduction display
 // ============================================================
 
 export class HudScene extends Phaser.Scene {
@@ -9,14 +10,17 @@ export class HudScene extends Phaser.Scene {
   }
 
   init(data) {
-    this.gameMode       = data.mode || 'solo';
-    this.gameTier       = data.tier || 'pro';
-    this.p1Score        = 0;
-    this.p2Score        = 0;
-    this.p1Lives        = 3;
-    this.p2Lives        = 3;
-    this.p1Streak       = 0;
-    this.p2Streak       = 0;
+    this.gameMode        = data.mode        || 'solo';
+    this.gameTier        = data.tier        || 'pro';
+    this.showOptions     = data.showOptions !== undefined ? data.showOptions : true;
+    this.p1DisplayName   = data.p1Name      || 'YOU';
+    this.p2DisplayName   = data.p2Name      || (this.gameMode === 'local2p' ? 'PLAYER 2' : 'CPU SHAQ');
+
+    this.p1Score         = 0;
+    this.p2Score         = 0;
+    this.p1Lives         = 3;
+    this.p2Lives         = 3;
+    this.p1Streak        = 0;
     this.shotPhaseActive = false;
     this.currentProblem  = null;
     this.turnOwner       = 'p1';
@@ -27,12 +31,9 @@ export class HudScene extends Phaser.Scene {
   create() {
     this._buildHUD();
     this._subscribeToPlay();
-
     const overlay = document.getElementById('hud-overlay');
     if (overlay) overlay.className = 'hud-visible';
   }
-
-  // ── Subscribe to PlayScene events ─────────────────────── //
 
   _subscribeToPlay() {
     const play = this.scene.get('PlayScene');
@@ -40,6 +41,7 @@ export class HudScene extends Phaser.Scene {
 
     play.events.on('new-problem',       this._onNewProblem,      this);
     play.events.on('timer-tick',        this._onTimerTick,       this);
+    play.events.on('shot-timer-tick',   this._onShotTimerTick,   this);
     play.events.on('p1-verdict',        this._onP1Verdict,       this);
     play.events.on('p2-verdict',        this._onP2Verdict,       this);
     play.events.on('p1-scored',         this._onP1Scored,        this);
@@ -49,7 +51,6 @@ export class HudScene extends Phaser.Scene {
     play.events.on('shot-phase-start',  this._onShotPhaseStart,  this);
     play.events.on('shot-phase-end',    this._onShotPhaseEnd,    this);
     play.events.on('power-update',      this._onPowerUpdate,     this);
-    play.events.on('wrong-answer',      () => {},                this);
     play.events.on('allow-retry',       this._onAllowRetry,      this);
     play.events.on('allow-p2-retry',    this._onAllowP2Retry,    this);
     play.events.on('hot-streak',        this._onHotStreak,       this);
@@ -70,44 +71,37 @@ export class HudScene extends Phaser.Scene {
     if (!overlay) return;
 
     const is2P   = this.gameMode === 'local2p';
-    const p2Name = is2P ? 'P2' : 'CPU';
+    const p2Name = is2P ? this.p2DisplayName : this.p2DisplayName;
 
     overlay.innerHTML = `
       <!-- TOP BAR -->
       <div class="hud-top">
-        <!-- P1 -->
         <div class="hud-player-block p1-block">
-          <div class="hud-avatar p1-color" id="avatar-p1">🟠</div>
+          <div class="hud-avatar p1-color">🟠</div>
           <div class="hud-score-col">
-            <div class="hud-player-name p1-name">YOU</div>
+            <div class="hud-player-name p1-name">${this.p1DisplayName}</div>
             <div class="hud-score p1-score" id="p1-score">0</div>
             <div class="hud-lives" id="p1-lives">
-              <span class="life-icon">❤️</span>
-              <span class="life-icon">❤️</span>
-              <span class="life-icon">❤️</span>
+              <span class="life-icon">❤️</span><span class="life-icon">❤️</span><span class="life-icon">❤️</span>
             </div>
           </div>
         </div>
 
-        <!-- Center -->
         <div class="hud-center-block">
-          <div class="hud-timer" id="timer-display">12</div>
+          <div class="hud-timer" id="timer-display">10</div>
           <div class="hud-round" id="round-indicator">ROUND 1 / 10</div>
           <div class="hud-mode-badge">${this._modeBadge()}</div>
         </div>
 
-        <!-- P2 / CPU -->
         <div class="hud-player-block p2-block">
           <div class="hud-score-col" style="text-align:right">
             <div class="hud-player-name p2-name">${p2Name}</div>
             <div class="hud-score p2-score" id="p2-score">0</div>
             <div class="hud-lives" style="justify-content:flex-end" id="p2-lives">
-              <span class="life-icon">❤️</span>
-              <span class="life-icon">❤️</span>
-              <span class="life-icon">❤️</span>
+              <span class="life-icon">❤️</span><span class="life-icon">❤️</span><span class="life-icon">❤️</span>
             </div>
           </div>
-          <div class="hud-avatar p2-color" id="avatar-p2">${is2P ? '🔵' : '🤖'}</div>
+          <div class="hud-avatar p2-color">${is2P ? '🔵' : '🤖'}</div>
         </div>
       </div>
 
@@ -119,10 +113,10 @@ export class HudScene extends Phaser.Scene {
         </div>
       </div>
 
-      <!-- RIGHT: Power bar + Streak -->
-      <div class="hud-right-panel">
+      <!-- LEFT: Streak panel (swapped from right) -->
+      <div class="hud-left-panel">
         <div class="streak-card">
-          <div class="streak-label">STREAK</div>
+          <div class="streak-label">🔥 STREAK</div>
           <div class="streak-val" id="streak-count">0</div>
           <div class="streak-fire" id="streak-fire">🔥</div>
         </div>
@@ -138,26 +132,26 @@ export class HudScene extends Phaser.Scene {
         </div>
       </div>
 
-      <!-- LEFT: Opponent panel (in solo mode) -->
-      <div class="hud-left-panel" id="hud-left-panel" style="${this.gameMode === 'flat' ? 'display:none' : ''}">
+      <!-- RIGHT: Opponent panel (swapped from left) -->
+      <div class="hud-right-panel" id="hud-opp-panel" style="${this.gameMode === 'flat' ? 'display:none' : ''}">
         <div class="opp-card">
           <div class="opp-label">OPPONENT</div>
-          <div class="opp-name" id="opp-name">${is2P ? 'PLAYER 2' : 'CPU SHAQ'}</div>
+          <div class="opp-name" id="opp-name">${p2Name}</div>
           <div class="opp-score-big" id="opp-score">0</div>
           <div class="opp-streak" id="opp-streak">🔥 0 streak</div>
           <div class="opp-status" id="opp-status">Waiting...</div>
         </div>
       </div>
 
-      <!-- ANSWER AREA -->
+      <!-- ANSWER AREA — bottom center -->
       <div class="hud-answer-area" id="hud-answer">
         ${is2P ? this._build2PInput() : this._buildSoloInput()}
-        <div class="hint-bar" id="hud-hint">Type your answer and press Enter, or tap a choice</div>
+        <div class="hint-bar" id="hud-hint">Type your answer and press Enter</div>
       </div>
 
       <!-- SHOOT INSTRUCTION -->
       <div class="shoot-tip hidden" id="shoot-instruction">
-        ⌨️ Press <strong>SPACE</strong> or <strong>ENTER</strong> to shoot!
+        Press <strong>SPACE</strong> or <strong>ENTER</strong> to shoot! ⌨️
       </div>
 
       <!-- POSSESSION TOAST -->
@@ -172,7 +166,6 @@ export class HudScene extends Phaser.Scene {
       <div class="feedback-flash" id="feedback-overlay"></div>
     `;
 
-    // Wire answer inputs
     this._wireInputs();
   }
 
@@ -188,7 +181,7 @@ export class HudScene extends Phaser.Scene {
             autocomplete="off" autocorrect="off" spellcheck="false" inputmode="decimal" />
           <button class="go-btn" id="submit-p1">GO ▶</button>
         </div>
-        <div class="choice-grid" id="choice-grid"></div>
+        <div class="choice-grid ${this.showOptions ? '' : 'hidden'}" id="choice-grid"></div>
       </div>`;
   }
 
@@ -196,7 +189,7 @@ export class HudScene extends Phaser.Scene {
     return `
       <div class="two-p-input-wrap">
         <div class="two-p-col p1-col" id="p1-col">
-          <div class="two-p-label p1-name">PLAYER 1 ▼</div>
+          <div class="two-p-label p1-name">${this.p1DisplayName} ▼</div>
           <div class="answer-row">
             <input type="text" class="answer-input p1-inp" id="answer-p1"
               placeholder="P1 answer..." autocomplete="off" inputmode="decimal" />
@@ -205,7 +198,7 @@ export class HudScene extends Phaser.Scene {
         </div>
         <div class="two-p-divider">VS</div>
         <div class="two-p-col p2-col" id="p2-col">
-          <div class="two-p-label p2-name">PLAYER 2 ▼</div>
+          <div class="two-p-label p2-name">${this.p2DisplayName} ▼</div>
           <div class="answer-row">
             <input type="text" class="answer-input p2-inp" id="answer-p2"
               placeholder="P2 answer..." autocomplete="off" inputmode="decimal" />
@@ -213,26 +206,25 @@ export class HudScene extends Phaser.Scene {
           </div>
         </div>
       </div>
-      <div class="choice-grid" id="choice-grid"></div>`;
+      <div class="choice-grid ${this.showOptions ? '' : 'hidden'}" id="choice-grid"></div>`;
   }
 
   _wireInputs() {
     const is2P = this.gameMode === 'local2p';
     const play = this.scene.get('PlayScene');
 
-    // P1 input
     const p1Input  = document.getElementById('answer-p1');
     const p1Submit = document.getElementById('submit-p1');
+
     if (p1Input) {
       setTimeout(() => p1Input.focus(), 200);
       p1Input.addEventListener('keydown', e => {
         if (e.key === 'Enter') { e.preventDefault(); this._submitP1(); }
-        if (e.key === ' ') e.stopPropagation(); // don't trigger shot
+        if (e.key === ' ') e.stopPropagation();
       });
     }
     if (p1Submit) p1Submit.addEventListener('click', () => this._submitP1());
 
-    // P2 input (2P mode only)
     if (is2P) {
       const p2Input  = document.getElementById('answer-p2');
       const p2Submit = document.getElementById('submit-p2');
@@ -245,14 +237,12 @@ export class HudScene extends Phaser.Scene {
       if (p2Submit) p2Submit.addEventListener('click', () => this._submitP2());
     }
 
-    // Choice grid clicks
     const grid = document.getElementById('choice-grid');
     if (grid) {
       grid.addEventListener('click', e => {
         const btn = e.target.closest('.choice-btn');
         if (!btn) return;
         const val = btn.dataset.value;
-        // Determine active player
         if (is2P && this.turnOwner === 'p2') {
           const inp = document.getElementById('answer-p2');
           if (inp) inp.value = val;
@@ -266,12 +256,22 @@ export class HudScene extends Phaser.Scene {
     }
   }
 
+  // ── Parse answer (handles fractions: "2/3" → "2/3") ─── //
+  _parseAnswer(raw) {
+    const val = raw.trim();
+    // If options are off and the problem is a fraction, allow "a/b" format
+    if (!val) return '';
+    // Normalize whitespace around /
+    return val.replace(/\s*\/\s*/g, '/');
+  }
+
   _submitP1() {
     if (this._inputLocked) return;
     const inp = document.getElementById('answer-p1');
     if (!inp) return;
-    const val = inp.value.trim();
-    if (!val) return;
+    const raw = inp.value.trim();
+    if (!raw) return;
+    const val = this._parseAnswer(raw);
     const play = this.scene.get('PlayScene');
     if (play) play.events.emit('player-answered', val);
   }
@@ -280,8 +280,9 @@ export class HudScene extends Phaser.Scene {
     if (this._p2InputLocked) return;
     const inp = document.getElementById('answer-p2');
     if (!inp) return;
-    const val = inp.value.trim();
-    if (!val) return;
+    const raw = inp.value.trim();
+    if (!raw) return;
+    const val = this._parseAnswer(raw);
     const play = this.scene.get('PlayScene');
     if (play) play.events.emit('p2-player-answered', val);
   }
@@ -289,13 +290,13 @@ export class HudScene extends Phaser.Scene {
   // ── Problem Display ───────────────────────────────────── //
 
   _onNewProblem(data) {
-    const { problem, index, total, timeLimit, turnOwner } = data;
-    this.currentProblem = problem;
-    this.turnOwner = turnOwner || 'p1';
-    this._inputLocked   = false;
-    this._p2InputLocked = false;
+    const { problem, index, total, timeLimit, turnOwner, showOptions } = data;
+    this.currentProblem  = problem;
+    this.turnOwner       = turnOwner || 'p1';
+    this._inputLocked    = false;
+    this._p2InputLocked  = false;
 
-    // Round indicator
+    // Round
     const roundEl = document.getElementById('round-indicator');
     if (roundEl) roundEl.textContent = `ROUND ${index} / ${total}`;
 
@@ -303,11 +304,12 @@ export class HudScene extends Phaser.Scene {
     const timerEl = document.getElementById('timer-display');
     if (timerEl) { timerEl.textContent = timeLimit; timerEl.className = 'hud-timer'; }
 
-    // Render stem
+    // Stem
     this._renderStem(problem);
 
-    // Build choices
-    this._buildChoices(problem);
+    // Choices (only if showOptions)
+    const showOpts = showOptions !== undefined ? showOptions : this.showOptions;
+    this._buildChoices(problem, showOpts);
 
     // Reset P1 input
     const p1Inp = document.getElementById('answer-p1');
@@ -317,26 +319,23 @@ export class HudScene extends Phaser.Scene {
       p1Inp.removeAttribute('disabled');
     }
 
-    // Reset P2 input in 2P mode
     if (this.gameMode === 'local2p') {
       const p2Inp = document.getElementById('answer-p2');
       if (p2Inp) { p2Inp.value = ''; p2Inp.removeAttribute('disabled'); }
-
-      // Highlight whose turn it is
-      this._highlight2PTurn(turnOwner);
+      this._highlight2PTurn(this.turnOwner);
     }
 
-    // Reset UI
     this._hidePossession();
     this._hideFeedback();
     this._hideShotInstruction();
     this._setOppStatus('Thinking... 🤔');
+    this._setHint(showOpts
+      ? 'Pick an answer or type and press Enter'
+      : 'Type your answer and press Enter');
 
-    // Focus correct input
     setTimeout(() => {
       if (this.gameMode === 'local2p') {
-        const toFocus = document.getElementById(turnOwner === 'p1' ? 'answer-p1' : 'answer-p2');
-        toFocus?.focus();
+        document.getElementById(this.turnOwner === 'p1' ? 'answer-p1' : 'answer-p2')?.focus();
       } else {
         document.getElementById('answer-p1')?.focus();
       }
@@ -353,13 +352,9 @@ export class HudScene extends Phaser.Scene {
   _renderStem(problem) {
     const stemEl = document.getElementById('stem-math');
     if (!stemEl) return;
-
     if (problem.isKatex && window.katex) {
       try {
-        stemEl.innerHTML = window.katex.renderToString(problem.stem, {
-          throwOnError: false,
-          displayMode: false
-        });
+        stemEl.innerHTML = window.katex.renderToString(problem.stem, { throwOnError: false, displayMode: false });
         stemEl.classList.add('has-katex');
       } catch (e) {
         stemEl.textContent = problem.display || problem.stem;
@@ -371,9 +366,16 @@ export class HudScene extends Phaser.Scene {
     }
   }
 
-  _buildChoices(problem) {
+  _buildChoices(problem, showOpts) {
     const grid = document.getElementById('choice-grid');
     if (!grid) return;
+
+    // Toggle visibility
+    if (!showOpts) {
+      grid.classList.add('hidden');
+      return;
+    }
+    grid.classList.remove('hidden');
 
     const choices = this._shuffle([
       String(problem.answer),
@@ -382,15 +384,15 @@ export class HudScene extends Phaser.Scene {
 
     grid.innerHTML = choices.map((c, i) => `
       <button class="choice-btn" data-value="${c}" data-index="${i}">
-        ${problem.isKatex ? this._renderChoiceKatex(c) : c}
+        ${problem.isKatex && c.includes('/') ? this._renderChoiceKatex(c) : c}
       </button>`).join('');
   }
 
   _renderChoiceKatex(val) {
-    if (!window.katex || !val.includes('/')) return val;
+    if (!window.katex) return val;
     try {
       const parts = val.split('/');
-      if (parts.length === 2) {
+      if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
         return window.katex.renderToString(`\\frac{${parts[0]}}{${parts[1]}}`, { throwOnError: false });
       }
     } catch (e) {}
@@ -416,13 +418,21 @@ export class HudScene extends Phaser.Scene {
     }
   }
 
+  _onShotTimerTick(remaining) {
+    const el = document.getElementById('timer-display');
+    if (el) {
+      el.textContent = Math.max(0, remaining);
+      el.className = remaining <= 4 ? 'hud-timer urgent' : 'hud-timer shot-timer';
+    }
+  }
+
   // ── Verdicts ──────────────────────────────────────────── //
 
   _onP1Verdict(data) {
     this._updateScore('p1-score', data.score);
     const inp = document.getElementById('answer-p1');
     if (data.correct) {
-      this.p1Score = data.score;
+      this.p1Score      = data.score;
       this._inputLocked = true;
       if (inp) { inp.className = 'answer-input correct-flash' + (this.gameMode === 'local2p' ? ' p1-inp' : ''); inp.setAttribute('disabled', 'true'); }
       this._updateStreak(data.streak);
@@ -433,19 +443,17 @@ export class HudScene extends Phaser.Scene {
           inp.className = 'answer-input' + (this.gameMode === 'local2p' ? ' p1-inp' : '');
           inp.value = '';
           inp.focus();
-        }, 460);
+        }, 450);
       }
     }
   }
 
   _onP2Verdict(data) {
-    this.p2Score   = data.score;
-    this.p2Streak  = data.streak;
-    // Update BOTH displays: top bar p2-score AND side panel opp-score
+    this.p2Score = data.score;
     this._updateScore('p2-score', data.score);
     this._updateScore('opp-score', data.score);
     const oppStreak = document.getElementById('opp-streak');
-    if (oppStreak) oppStreak.textContent = `🔥 ${data.streak} streak`;
+    if (oppStreak) oppStreak.textContent = `🔥 ${data.streak || 0} streak`;
 
     if (this.gameMode === 'local2p') {
       const inp = document.getElementById('answer-p2');
@@ -455,11 +463,7 @@ export class HudScene extends Phaser.Scene {
       } else {
         if (inp) {
           inp.className = 'answer-input p2-inp wrong-shake';
-          setTimeout(() => {
-            inp.className = 'answer-input p2-inp';
-            inp.value = '';
-            inp.focus();
-          }, 460);
+          setTimeout(() => { inp.className = 'answer-input p2-inp'; inp.value = ''; inp.focus(); }, 450);
         }
       }
     }
@@ -467,16 +471,15 @@ export class HudScene extends Phaser.Scene {
 
   _onP1Scored(data) {
     this._updateScore('p1-score', data.score);
-    this._showFeedback(`🏀 +${data.points} pts`, '#22C55E');
-    this._setHint(`${data.zone?.toUpperCase() || 'ZONE'} — ${data.points} points!`);
+    this._showFeedback(`🏀 +${data.points} pts!`, '#22C55E');
+    this._setHint(`${data.zone?.toUpperCase() || 'NICE'} — ${data.points} pts!`);
   }
 
   _onP2Scored(data) {
     this.p2Score = data.score;
     this._updateScore('p2-score', data.score);
     this._updateScore('opp-score', data.score);
-    this._showFeedback(this.gameMode === 'local2p' ? `P2 +${data.points}` : `CPU +${data.points}`, '#4DA6FF');
-    this._setHint(`${this.gameMode === 'local2p' ? 'P2' : 'CPU'} scored ${data.points}!`);
+    this._showFeedback(this.gameMode === 'local2p' ? `P2 +${data.points}!` : `CPU +${data.points}!`, '#4DA6FF');
   }
 
   _updateScore(id, val) {
@@ -490,8 +493,8 @@ export class HudScene extends Phaser.Scene {
   _onP1LostLife(lives) {
     this.p1Lives = lives;
     this._updateLives('p1-lives', lives);
-    this._setHint('⏰ Too slow! -1 life');
-    this.cameras?.main?.shake?.(160, 0.005);
+    this._showFeedback('❌ -1 LIFE!', '#EF4444');
+    this._setHint(lives <= 0 ? '💀 No lives left!' : `⚠️ Wrong! ${lives} ${lives === 1 ? 'life' : 'lives'} left`);
   }
 
   _onP2LostLife(lives) {
@@ -520,8 +523,8 @@ export class HudScene extends Phaser.Scene {
     this.shotPhaseActive = true;
     document.getElementById('power-bar')?.classList.remove('hidden');
     document.getElementById('shoot-instruction')?.classList.remove('hidden');
-    const p1Inp = document.getElementById('answer-p1');
-    if (p1Inp) p1Inp.setAttribute('disabled', 'true');
+    document.getElementById('answer-p1')?.setAttribute('disabled', 'true');
+    document.getElementById('answer-p2')?.setAttribute('disabled', 'true');
     this._setHint('⌨️ Press SPACE or ENTER to shoot!');
   }
 
@@ -538,25 +541,23 @@ export class HudScene extends Phaser.Scene {
     const pct  = document.getElementById('power-pct');
     if (fill) {
       fill.style.height = `${power}%`;
-      const zoneColors = {
+      const colors = {
         green:  'linear-gradient(to top, #14532D, #22C55E)',
         yellow: 'linear-gradient(to top, #713F12, #EAB308)',
         orange: 'linear-gradient(to top, #92400E, #F97316)',
         red:    'linear-gradient(to top, #7F1D1D, #EF4444)'
       };
-      fill.style.background = zoneColors[zone.name] || zoneColors.red;
-      if (zone.name === 'green') fill.style.boxShadow = '0 0 12px rgba(34,197,94,0.6)';
-      else fill.style.boxShadow = 'none';
+      fill.style.background  = colors[zone.name] || colors.red;
+      fill.style.boxShadow   = zone.name === 'green' ? '0 0 12px rgba(34,197,94,0.6)' : 'none';
     }
     if (pct) pct.textContent = `${power}%`;
   }
 
-  // ── Feedback ──────────────────────────────────────────── //
+  // ── Retries / Status ──────────────────────────────────── //
 
   _onAllowRetry() {
     const inp = document.getElementById('answer-p1');
     if (inp) { inp.value = ''; inp.className = 'answer-input'; inp.removeAttribute('disabled'); inp.focus(); }
-    this._setHint('Wrong — try again!');
   }
 
   _onAllowP2Retry() {
@@ -568,7 +569,7 @@ export class HudScene extends Phaser.Scene {
     const banner = document.getElementById('streak-banner');
     if (banner) {
       banner.textContent = `🔥 ${data.streak}x STREAK! 🔥`;
-      banner.className = 'streak-banner show';
+      banner.className   = 'streak-banner show';
       setTimeout(() => { banner.className = 'streak-banner'; }, 2200);
     }
   }
@@ -582,8 +583,8 @@ export class HudScene extends Phaser.Scene {
   _onRevealAnswer(data) {
     const stemEl = document.getElementById('stem-math');
     if (stemEl) {
-      const ans = document.createElement('span');
-      ans.style.cssText = 'color:#22C55E;margin-left:14px;font-size:0.75em;font-family:Inter,sans-serif';
+      const ans       = document.createElement('span');
+      ans.style.cssText = 'color:#22C55E;margin-left:14px;font-size:0.72em;font-family:Inter,sans-serif';
       ans.textContent = `✓ ${data.answer}`;
       stemEl.appendChild(ans);
     }
@@ -600,9 +601,7 @@ export class HudScene extends Phaser.Scene {
   }
 
   _onShotResult(data) {
-    if (data.result.scored) {
-      this._showFeedback(`🏀 ${data.result.label}`, data.result.color);
-    }
+    if (data.result.scored) this._showFeedback(`🏀 ${data.result.label}`, data.result.color);
   }
 
   _onShotMiss(data) {
@@ -613,7 +612,7 @@ export class HudScene extends Phaser.Scene {
     const el = document.getElementById('opp-status');
     if (el) {
       el.textContent = text;
-      el.className = text.toLowerCase().includes('think') ? 'opp-status thinking' : 'opp-status';
+      el.className   = text.toLowerCase().includes('think') ? 'opp-status thinking' : 'opp-status';
     }
   }
 
@@ -625,16 +624,16 @@ export class HudScene extends Phaser.Scene {
   _showFeedback(text, color = '#fff') {
     const el = document.getElementById('feedback-overlay');
     if (!el) return;
-    el.textContent = text;
-    el.style.color = color;
-    el.style.textShadow = `0 0 30px ${color}`;
-    el.className = 'feedback-flash show';
+    el.textContent       = text;
+    el.style.color       = color;
+    el.style.textShadow  = `0 0 30px ${color}`;
+    el.className         = 'feedback-flash show';
     setTimeout(() => { el.className = 'feedback-flash'; }, 700);
   }
 
-  _hideFeedback()       { const e = document.getElementById('feedback-overlay'); if (e) e.className = 'feedback-flash'; }
-  _hidePossession()     { const e = document.getElementById('possession-notice'); if (e) e.className = 'possession-toast'; }
-  _hideShotInstruction(){ const e = document.getElementById('shoot-instruction'); if (e) e.classList.add('hidden'); }
+  _hideFeedback()        { const e = document.getElementById('feedback-overlay');  if (e) e.className = 'feedback-flash'; }
+  _hidePossession()      { const e = document.getElementById('possession-notice'); if (e) e.className = 'possession-toast'; }
+  _hideShotInstruction() { const e = document.getElementById('shoot-instruction'); if (e) e.classList.add('hidden'); }
 
   // ── Game Over ─────────────────────────────────────────── //
 
@@ -648,14 +647,13 @@ export class HudScene extends Phaser.Scene {
     let el = document.getElementById('gameover-screen');
     if (!el) { el = document.createElement('div'); el.id = 'gameover-screen'; document.body.appendChild(el); }
 
-    const isWin    = data.result === 'win';
-    const isLose   = data.result === 'lose';
-    const isDraw   = data.result === 'draw';
-    const isFlat   = data.result === 'complete';
-    const is2P     = data.mode === 'local2p';
+    const isWin  = data.result === 'win';
+    const isLose = data.result === 'lose';
+    const isFlat = data.result === 'complete';
+    const is2P   = data.mode === 'local2p';
 
-    const heading  = isWin ? '🏆 YOU WIN!' : isLose ? '😤 YOU LOSE' : isDraw ? '🤝 DRAW!' : '✅ COMPLETE!';
-    const subtext  = isWin ? 'Outstanding math skills!' : isLose ? 'Keep practising!' : isDraw ? 'So close!' : 'Practice done!';
+    const heading   = isWin ? '🏆 YOU WIN!' : isLose ? '😤 YOU LOSE' : '✅ COMPLETE!';
+    const subtext   = isWin ? 'Outstanding math skills!' : isLose ? 'Keep practising! 💪' : 'Practice done!';
     const resultCls = isWin ? 'win' : isLose ? 'lose' : '';
 
     el.innerHTML = `
@@ -663,62 +661,47 @@ export class HudScene extends Phaser.Scene {
         <div class="go-stars-wrap" id="go-stars"></div>
         <div class="go-heading ${resultCls}">${heading}</div>
         <div class="go-sub">${subtext}</div>
-
         <div class="go-scores">
           <div class="go-score-card p1-card">
-            <div class="go-score-name">YOU</div>
+            <div class="go-score-name">${data.p1Name}</div>
             <div class="go-score-val">${data.p1Score}</div>
             <div class="go-score-lbl">pts</div>
           </div>
           <div class="go-vs">VS</div>
           <div class="go-score-card p2-card">
-            <div class="go-score-name">${is2P ? 'PLAYER 2' : 'CPU'}</div>
+            <div class="go-score-name">${is2P ? data.p2Name : 'CPU'}</div>
             <div class="go-score-val">${data.p2Score}</div>
             <div class="go-score-lbl">pts</div>
           </div>
         </div>
-
         <div class="go-stats">
           <div class="go-stat"><span>${data.accuracy}%</span><label>Accuracy</label></div>
-          <div class="go-stat"><span>${data.problems}</span><label>Problems</label></div>
+          <div class="go-stat"><span>${data.problems}</span><label>Rounds</label></div>
           <div class="go-stat"><span>${data.streakMax}</span><label>Best Streak</label></div>
         </div>
-
         <div class="go-btns">
           <button class="go-btn-play" id="go-rematch">▶ PLAY AGAIN</button>
-          <button class="go-btn-menu" id="go-menu">🏠 MAIN MENU</button>
+          <button class="go-btn-menu" id="go-menu">🏠 MENU</button>
         </div>
       </div>
     `;
 
     el.className = 'show';
+    this._animateGoStars(isWin);
 
-    // Animate stars / balls falling
-    this._animateGoStars(el, isWin);
-
-    document.getElementById('go-rematch').addEventListener('click', () => {
-      el.className = '';
-      this._restartGame();
-    });
-    document.getElementById('go-menu').addEventListener('click', () => {
-      el.className = '';
-      this._goToMenu();
-    });
+    document.getElementById('go-rematch').addEventListener('click', () => { el.className = ''; this._restartGame(); });
+    document.getElementById('go-menu').addEventListener('click',    () => { el.className = ''; this._goToMenu(); });
   }
 
-  _animateGoStars(el, isWin) {
+  _animateGoStars(isWin) {
     const wrap = document.getElementById('go-stars');
     if (!wrap) return;
-    const count = isWin ? 12 : 4;
+    const count = isWin ? 14 : 4;
     for (let i = 0; i < count; i++) {
       const star = document.createElement('div');
-      star.className = 'go-star';
-      star.textContent = isWin ? '⭐' : '🏀';
-      star.style.cssText = `
-        left: ${Math.random() * 90 + 5}%;
-        animation-delay: ${Math.random() * 1.5}s;
-        font-size: ${Math.random() * 16 + 18}px;
-      `;
+      star.className     = 'go-star';
+      star.textContent   = isWin ? ['⭐','🏀','✨'][i % 3] : '🏀';
+      star.style.cssText = `left:${Math.random() * 90 + 5}%;animation-delay:${Math.random() * 1.8}s;font-size:${Math.random() * 18 + 18}px;`;
       wrap.appendChild(star);
     }
   }
@@ -726,17 +709,17 @@ export class HudScene extends Phaser.Scene {
   _restartGame() {
     this.scene.stop('HudScene');
     this.scene.stop('PlayScene');
-    this.scene.start('PlayScene', { mode: this.gameMode, tier: this.gameTier });
-    this.scene.launch('HudScene', { mode: this.gameMode, tier: this.gameTier });
+    this.scene.start('PlayScene', { mode: this.gameMode, tier: this.gameTier, showOptions: this.showOptions,
+      p1Name: this.p1DisplayName, p2Name: this.p2DisplayName });
+    this.scene.launch('HudScene', { mode: this.gameMode, tier: this.gameTier, showOptions: this.showOptions,
+      p1Name: this.p1DisplayName, p2Name: this.p2DisplayName });
   }
 
   _goToMenu() {
     this.scene.stop('HudScene');
     this.scene.stop('PlayScene');
-
     const hud = document.getElementById('hud-overlay');
     if (hud) { hud.className = 'hud-hidden'; hud.innerHTML = ''; }
-
     this.scene.start('MenuScene');
   }
 }

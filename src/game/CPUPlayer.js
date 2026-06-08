@@ -1,104 +1,144 @@
 // ============================================================
-// CPUPlayer.js — CPU AI opponent simulation
-// Speed tiers: Easy / Medium / Hard / Matched
+// CPUPlayer.js — Smart CPU opponent
+// Behaves like an intelligent kid of the chosen grade
 // ============================================================
 
 export class CPUPlayer {
   constructor() {
-    this.name = 'CPU Shaq';
-    this.score = 0;
-    this.lives = 3;
+    this.name   = 'CPU Shaq';
+    this.score  = 0;
+    this.lives  = 3;
     this.streak = 0;
-    this.errorRate = 0.12;      // 12% chance to make a mistake
-    this.speedTier = 'medium';  // easy | medium | hard | matched
-    this._answerTimeout = null;
+
+    // Tier-based behavioral parameters
+    this._tier        = 'pro';
+    this._errorRate   = 0.12;   // probability of wrong answer
+    this._minDelaySec = 3.0;    // fastest possible answer (sec)
+    this._maxDelaySec = 8.0;    // slowest (sec)
+    this._timeoutRate = 0.05;   // probability of not answering at all
+
+    this._answerTimeout  = null;
     this._currentProblem = null;
   }
 
-  setSpeedTier(tier) {
-    this.speedTier = tier;
+  /**
+   * Configures the CPU to behave like a smart student at the given tier.
+   * - varsity (Grades 2-3): slow, occasionally wrong, sometimes too slow
+   * - pro     (Grades 3-4): moderate speed, ~90% accuracy, challenges player
+   * - allstar (Grades 5-6): fast and sharp, rarely wrong
+   */
+  setTier(tier) {
+    this._tier = tier;
     switch (tier) {
-      case 'easy':    this.errorRate = 0.22; break;
-      case 'medium':  this.errorRate = 0.12; break;
-      case 'hard':    this.errorRate = 0.05; break;
-      case 'matched': this.errorRate = 0.10; break;
+      case 'varsity':
+        // Like a smart 2nd-3rd grader: gets it right eventually but takes time
+        this._errorRate   = 0.20;   // 20% chance of wrong
+        this._minDelaySec = 4.5;
+        this._maxDelaySec = 9.5;
+        this._timeoutRate = 0.08;
+        break;
+      case 'pro':
+        // Like a capable 4th grader: solid but beatable
+        this._errorRate   = 0.10;
+        this._minDelaySec = 2.5;
+        this._maxDelaySec = 7.5;
+        this._timeoutRate = 0.04;
+        break;
+      case 'allstar':
+        // Like a sharp 6th grader: fast, rarely wrong, real challenge
+        this._errorRate   = 0.04;
+        this._minDelaySec = 1.5;
+        this._maxDelaySec = 5.5;
+        this._timeoutRate = 0.02;
+        break;
+      default:
+        this._errorRate   = 0.12;
+        this._minDelaySec = 3.0;
+        this._maxDelaySec = 8.0;
+        this._timeoutRate = 0.05;
     }
+  }
+
+  // Legacy method for backward compat
+  setSpeedTier(tier) {
+    const map = { easy: 'varsity', medium: 'pro', hard: 'allstar' };
+    this.setTier(map[tier] || tier);
   }
 
   setName(name) { this.name = name; }
 
   reset() {
-    this.score = 0;
-    this.lives = 3;
+    this.score  = 0;
+    this.lives  = 3;
     this.streak = 0;
     this._clearTimeout();
     this._currentProblem = null;
   }
 
-  // Called when a new problem starts. Schedules an answer.
-  // onAnswer(correct, timeTaken) is called when CPU answers
+  /**
+   * Schedule CPU's answer for the given problem.
+   * Simulates a human student thinking through the math.
+   *
+   * @param problem      — the current problem object
+   * @param timeLimit    — seconds available
+   * @param onAnswer     — callback(isCorrect, timeTaken, timedOut)
+   */
   scheduleProblem(problem, timeLimit, onAnswer) {
     this._clearTimeout();
     this._currentProblem = problem;
 
-    const delay = this._getAnswerDelay(timeLimit);
+    // Calculate a realistic "thinking time" based on problem type
+    const thinkingTime = this._calcThinkingTime(problem, timeLimit);
 
     this._answerTimeout = setTimeout(() => {
-      const willAnswer = Math.random() > 0.08; // 8% timeout rate
-      if (!willAnswer) {
-        onAnswer(false, timeLimit, true); // timeout
+      // Does the CPU answer at all?
+      if (Math.random() < this._timeoutRate) {
+        onAnswer(false, timeLimit, true);
         return;
       }
 
-      const willBeCorrect = Math.random() > this.errorRate;
-      onAnswer(willBeCorrect, delay / 1000, false);
-    }, delay);
+      // Does the CPU get it right?
+      const correct = Math.random() >= this._errorRate;
+      onAnswer(correct, thinkingTime / 1000, false);
+    }, thinkingTime);
   }
 
-  _getAnswerDelay(timeLimit) {
+  /**
+   * Calculate how long the CPU "thinks" about the problem.
+   * Harder problems → longer, easier → shorter, all capped by timeLimit.
+   */
+  _calcThinkingTime(problem, timeLimit) {
     const timeLimitMs = timeLimit * 1000;
+    let minMs = this._minDelaySec * 1000;
+    let maxMs = this._maxDelaySec * 1000;
 
-    // Delay ranges (ms) per tier
-    switch (this.speedTier) {
-      case 'easy':
-        return this._randomDelay(timeLimitMs * 0.6, timeLimitMs * 0.95);
-      case 'medium':
-        return this._randomDelay(timeLimitMs * 0.35, timeLimitMs * 0.75);
-      case 'hard':
-        return this._randomDelay(timeLimitMs * 0.15, timeLimitMs * 0.45);
-      case 'matched':
-        return this._randomDelay(timeLimitMs * 0.25, timeLimitMs * 0.65);
-      default:
-        return this._randomDelay(timeLimitMs * 0.3, timeLimitMs * 0.7);
+    // Adjust for problem difficulty
+    if (problem.topic) {
+      if (problem.topic.includes('addition') || problem.topic.includes('subtraction')) {
+        // Easy operation — answer faster
+        minMs *= 0.75;
+        maxMs *= 0.75;
+      } else if (problem.topic.includes('fractions')) {
+        // Fractions take longer even for smart students
+        minMs *= 1.3;
+        maxMs *= 1.25;
+      } else if (problem.topic.includes('division')) {
+        // Division takes a bit longer
+        minMs *= 1.1;
+        maxMs *= 1.1;
+      }
     }
+
+    // Clamp to time limit
+    minMs = Math.min(minMs, timeLimitMs * 0.35);
+    maxMs = Math.min(maxMs, timeLimitMs * 0.92);
+
+    if (minMs >= maxMs) maxMs = minMs + 500;
+
+    return minMs + Math.random() * (maxMs - minMs);
   }
 
-  _randomDelay(min, max) {
-    return min + Math.random() * (max - min);
-  }
-
-  applyVerdict(isCorrect) {
-    if (isCorrect) {
-      this.streak++;
-      // CPU doesn't always score (simulate shot accuracy)
-      const shotSuccess = Math.random() > 0.25;
-      if (shotSuccess) this.score += 10;
-    } else {
-      this.streak = 0;
-    }
-  }
-
-  loseLife() {
-    this.lives = Math.max(0, this.lives - 1);
-  }
-
-  isEliminated() {
-    return this.lives <= 0;
-  }
-
-  cancelProblem() {
-    this._clearTimeout();
-  }
+  cancelProblem() { this._clearTimeout(); }
 
   _clearTimeout() {
     if (this._answerTimeout !== null) {
@@ -107,9 +147,11 @@ export class CPUPlayer {
     }
   }
 
-  // Status text for HUD display
   getStatusText() {
     if (this.streak >= 3) return `🔥 ${this.streak} streak!`;
     return 'Thinking...';
   }
+
+  isEliminated() { return this.lives <= 0; }
+  loseLife()     { this.lives = Math.max(0, this.lives - 1); }
 }

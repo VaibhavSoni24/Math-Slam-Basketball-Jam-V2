@@ -66,6 +66,7 @@ function startGame() {
   _ensureMenuScreen();
   _ensureGameOverScreen();
   _ensureCountdownOverlay();
+  _ensureHudOverlay();
 
   const game = new Phaser.Game(config);
   window.__game = game;
@@ -105,6 +106,15 @@ function _ensureCountdownOverlay() {
   if (!document.getElementById('countdown-overlay')) {
     const div = document.createElement('div');
     div.id = 'countdown-overlay';
+    document.body.appendChild(div);
+  }
+}
+
+function _ensureHudOverlay() {
+  if (!document.getElementById('hud-overlay')) {
+    const div = document.createElement('div');
+    div.id = 'hud-overlay';
+    div.className = 'hud-hidden';
     document.body.appendChild(div);
   }
 }
