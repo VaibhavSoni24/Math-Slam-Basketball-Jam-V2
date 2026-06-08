@@ -79,15 +79,15 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
 .life-icon{font-size:13px;transition:opacity 0.3s,transform 0.3s;}
 .life-icon.lost{opacity:0.15;transform:scale(0.6);filter:grayscale(1);}
 
-.hud-center-block{display:flex;flex-direction:column;align-items:center;gap:2px;}
-.hud-timer{font-family:var(--font-d);font-size:48px;line-height:1;color:var(--txt);
+.hud-center-block{display:flex;flex-direction:row;align-items:center;gap:14px;}
+.hud-timer{font-family:var(--font-d);font-size:46px;line-height:1;color:var(--txt);
   text-shadow:0 0 20px rgba(255,215,0,0.35);letter-spacing:2px;transition:color 0.25s;}
 .hud-timer.urgent{color:var(--bad);animation:timer-pulse 0.45s ease-in-out infinite alternate;}
 .hud-timer.shot-timer{color:var(--p1);}
 @keyframes timer-pulse{to{text-shadow:0 0 28px var(--bad);transform:scale(1.05);}}
-.hud-round{font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--txtd);}
+.hud-round{font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--txtd);min-width:90px;text-align:right;}
 .hud-mode-badge{font-size:10px;font-weight:800;letter-spacing:1px;text-transform:uppercase;
-  padding:2px 10px;background:rgba(255,215,0,0.1);border:1px solid rgba(255,215,0,0.22);border-radius:20px;color:var(--gold);}
+  padding:4px 10px;background:rgba(255,215,0,0.1);border:1px solid rgba(255,215,0,0.22);border-radius:20px;color:var(--gold);min-width:90px;text-align:center;}
 
 /* ── STEM ─────────────────────────────────────────────────── */
 .hud-stem-wrap{
@@ -263,6 +263,9 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
 #menu-screen{
   position:fixed;inset:0;z-index:300;
   display:flex;align-items:center;justify-content:center;
+  background: linear-gradient(150deg, rgba(6,6,20,0.85) 0%, rgba(26,26,46,0.85) 55%, rgba(15,52,96,0.85) 100%), url('assets/images/court_bg.png');
+  background-size: cover;
+  background-position: center;
   transition:opacity 0.4s ease;pointer-events:auto;overflow-y:auto;
 }
 

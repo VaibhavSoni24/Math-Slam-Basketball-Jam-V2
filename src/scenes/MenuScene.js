@@ -51,11 +51,6 @@ export class MenuScene extends Phaser.Scene {
     bg.fillGradientStyle(0x060614, 0x060614, 0x0F3460, 0x1A1A2E, 1);
     bg.fillRect(0, 0, width, height);
 
-    if (this.textures.exists('court_bg')) {
-      this.add.image(width / 2, height / 2, 'court_bg')
-        .setDisplaySize(width, height).setAlpha(0.08);
-    }
-
     // Floating orbs
     for (let i = 0; i < 16; i++) {
       const r = Phaser.Math.Between(2, 6);
@@ -76,20 +71,6 @@ export class MenuScene extends Phaser.Scene {
           dot.alpha = Phaser.Math.FloatBetween(0.06, 0.22);
         }
       });
-    }
-
-    // P1 showcase — left side, faces right (default)
-    if (this.textures.exists('p1_idle')) {
-      const p1 = this.add.image(width * 0.08, height * 0.52, 'p1_idle')
-        .setDisplaySize(200, 250).setAlpha(0.7);
-      this.tweens.add({ targets: p1, y: p1.y - 12, duration: 2200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    }
-
-    // P2 showcase — right side, faces left (default)
-    if (this.textures.exists('p2_idle')) {
-      const p2 = this.add.image(width * 0.92, height * 0.52, 'p2_idle')
-        .setDisplaySize(200, 250).setAlpha(0.7);
-      this.tweens.add({ targets: p2, y: p2.y - 12, duration: 2400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: 300 });
     }
 
     // Floating stars
@@ -203,7 +184,7 @@ export class MenuScene extends Phaser.Scene {
 
             <!-- P1 -->
             <div class="player-setup-card p1-setup">
-              <div class="ps-avatar">🟠</div>
+              <div class="ps-avatar"><img src="assets/images/player_orange.png" style="width:160%; margin-top:-8px;" /></div>
               <div class="ps-fields">
                 <label class="ps-label p1-label">Player 1</label>
                 <input type="text" class="ps-input" id="p1-name-input"
@@ -214,7 +195,7 @@ export class MenuScene extends Phaser.Scene {
 
             <!-- P2 (only visible in 2P) -->
             <div class="player-setup-card p2-setup hidden" id="p2-setup-card">
-              <div class="ps-avatar">🔵</div>
+              <div class="ps-avatar"><img src="assets/images/player_blue.png" style="width:160%; margin-top:-8px; transform: scaleX(-1);" /></div>
               <div class="ps-fields">
                 <label class="ps-label p2-label">Player 2</label>
                 <input type="text" class="ps-input" id="p2-name-input"

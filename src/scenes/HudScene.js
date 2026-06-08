@@ -88,8 +88,8 @@ export class HudScene extends Phaser.Scene {
         </div>
 
         <div class="hud-center-block">
-          <div class="hud-timer" id="timer-display">10</div>
           <div class="hud-round" id="round-indicator">ROUND 1 / 10</div>
+          <div class="hud-timer" id="timer-display">10</div>
           <div class="hud-mode-badge">${this._modeBadge()}</div>
         </div>
 
@@ -328,7 +328,11 @@ export class HudScene extends Phaser.Scene {
     this._hidePossession();
     this._hideFeedback();
     this._hideShotInstruction();
-    this._setOppStatus('Thinking... 🤔');
+    if (this.gameMode === 'local2p') {
+      this._setOppStatus('');
+    } else {
+      this._setOppStatus('Thinking... 🤔');
+    }
     this._setHint(showOpts
       ? 'Pick an answer or type and press Enter'
       : 'Type your answer and press Enter');
@@ -707,15 +711,15 @@ export class HudScene extends Phaser.Scene {
   }
 
   _restartGame() {
-    this.scene.stop('HudScene');
-    this.scene.stop('PlayScene');
-    this.scene.start('PlayScene', { mode: this.gameMode, tier: this.gameTier, showOptions: this.showOptions,
-      p1Name: this.p1DisplayName, p2Name: this.p2DisplayName });
-    this.scene.launch('HudScene', { mode: this.gameMode, tier: this.gameTier, showOptions: this.showOptions,
-      p1Name: this.p1DisplayName, p2Name: this.p2DisplayName });
+    this.scene.stop('GameOverScene');
+    const data = { mode: this.gameMode, tier: this.gameTier, showOptions: this.showOptions, p1Name: this.p1DisplayName, p2Name: this.p2DisplayName };
+    const play = this.scene.get('PlayScene');
+    if (play) play.scene.restart(data);
+    this.scene.restart(data);
   }
 
   _goToMenu() {
+    this.scene.stop('GameOverScene');
     this.scene.stop('HudScene');
     this.scene.stop('PlayScene');
     const hud = document.getElementById('hud-overlay');

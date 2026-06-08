@@ -88,18 +88,21 @@ export class CPUPlayer {
     this._clearTimeout();
     this._currentProblem = problem;
 
-    // Practice mode: CPU gives player 5s to try, then steps in correctly
+    // Calculate a realistic "thinking time" based on problem type
+    let thinkingTime = this._calcThinkingTime(problem, timeLimit);
+
+    // Practice mode: CPU gets a flat 5s delay ON TOP of its normal thinking time
     if (mode === 'flat') {
-      this._answerTimeout = setTimeout(() => {
-        onAnswer(true, 5, false);
-      }, 5000);
-      return;
+      thinkingTime += 5000;
     }
 
-    // Calculate a realistic "thinking time" based on problem type
-    const thinkingTime = this._calcThinkingTime(problem, timeLimit);
-
     this._answerTimeout = setTimeout(() => {
+      // Practice mode CPU never times out and is always correct
+      if (mode === 'flat') {
+        onAnswer(true, thinkingTime / 1000, false);
+        return;
+      }
+
       // Does the CPU answer at all?
       if (Math.random() < this._timeoutRate) {
         onAnswer(false, timeLimit, true);
