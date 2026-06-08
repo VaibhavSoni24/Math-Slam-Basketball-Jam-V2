@@ -30,6 +30,7 @@ export class ShotMechanic {
   }
 
   start(onPowerChange) {
+    this.stop();
     this.power = 0;
     this.direction = 1;
     this.isActive = true;

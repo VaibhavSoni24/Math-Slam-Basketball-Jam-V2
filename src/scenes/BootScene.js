@@ -67,50 +67,64 @@ export class BootScene extends Phaser.Scene {
 
   _createLoadingUI() {
     const { width, height } = this.scale;
+    const cx = width / 2;
+    const cy = height / 2;
 
-    this.add.rectangle(width / 2, height / 2, width, height, 0x1A1A2E);
+    const bg = this.add.graphics();
+    bg.fillGradientStyle(0x060614, 0x060614, 0x0F3460, 0x1A1A2E, 1);
+    bg.fillRect(0, 0, width, height);
 
-    // Basketball icon
-    this.add.text(width / 2, height / 2 - 80, '🏀', { fontSize: 56 }).setOrigin(0.5);
+    // Basketball emoji with bouncing animation
+    const ball = this.add.text(cx, cy - 100, '🏀', { fontSize: 72 }).setOrigin(0.5);
+    this.tweens.add({
+      targets: ball,
+      y: cy - 130,
+      duration: 450,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Quad.easeOut'
+    });
 
-    this.add.text(width / 2, height / 2 - 16, 'MATH SLAM', {
+    this.add.text(cx, cy - 20, 'MATH SLAM', {
       fontFamily: "'Bebas Neue', sans-serif",
-      fontSize: 52,
+      fontSize: 64,
       color: '#E85D04',
-      letterSpacing: 8
+      letterSpacing: 8,
+      shadow: { offsetX: 0, offsetY: 4, color: '#000', blur: 8, fill: true }
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, height / 2 + 36, 'BASKETBALL JAM', {
+    this.add.text(cx, cy + 30, 'BASKETBALL JAM', {
       fontFamily: "'Bebas Neue', sans-serif",
-      fontSize: 28,
+      fontSize: 32,
       color: '#1A6FBF',
-      letterSpacing: 4
+      letterSpacing: 4,
+      shadow: { offsetX: 0, offsetY: 2, color: '#000', blur: 4, fill: true }
     }).setOrigin(0.5);
 
     // Progress bar
-    const barW = 340, barH = 8;
-    const barX = width / 2 - barW / 2;
-    const barY = height / 2 + 90;
+    const barW = 400, barH = 12;
+    const barY = cy + 100;
 
-    this.add.rectangle(width / 2, barY + barH / 2, barW, barH, 0x0F3460).setOrigin(0.5, 0.5);
-    this._progressFill = this.add.rectangle(barX, barY, 0, barH, 0xE85D04).setOrigin(0, 0);
+    this.add.rectangle(cx, barY, barW, barH, 0x0F3460).setOrigin(0.5);
+    this._progressFill = this.add.rectangle(cx - barW/2, barY, 0, barH, 0xE85D04).setOrigin(0, 0.5);
 
-    this._loadingText = this.add.text(width / 2, barY + 22, 'Loading...', {
+    this._loadingText = this.add.text(cx, barY + 30, 'Loading...', {
       fontFamily: 'Inter, sans-serif',
-      fontSize: 13,
+      fontSize: 14,
+      fontWeight: 'bold',
       color: '#94A3B8',
-      letterSpacing: 2
+      letterSpacing: 3
     }).setOrigin(0.5);
   }
 
   _updateProgress(value) {
-    const barW = 340;
+    const barW = 400;
     if (this._progressFill) this._progressFill.width = value * barW;
     if (this._loadingText)  this._loadingText.setText(`Loading... ${Math.round(value * 100)}%`);
   }
 
   _onLoadComplete() {
     if (this._loadingText)  this._loadingText.setText('Ready!');
-    if (this._progressFill) this._progressFill.width = 340;
+    if (this._progressFill) this._progressFill.width = 400;
   }
 }

@@ -107,8 +107,10 @@ export class PlayScene extends Phaser.Scene {
   _createCourt() {
     const { width, height } = this.scale;
     if (this.textures.exists('court_bg')) {
-      this.add.image(width / 2, height / 2, 'court_bg')
-        .setDisplaySize(width, height).setDepth(0);
+      const bg = this.add.image(width / 2, height / 2, 'court_bg').setDepth(0);
+      const scaleX = width / bg.width;
+      const scaleY = height / bg.height;
+      bg.setScale(Math.max(scaleX, scaleY) * 1.05); // slight over-scale to hide asset edges
     } else {
       const g = this.add.graphics();
       g.fillGradientStyle(0x0a0a1e, 0x0a0a1e, 0x1A1A2E, 0x0F2040, 1);
@@ -202,7 +204,7 @@ export class PlayScene extends Phaser.Scene {
   _createBallGlow() {
     if (this.textures.exists('ball_glow')) {
       this.ballGlow = this.add.image(0, 0, 'ball_glow')
-        .setDisplaySize(110, 110).setDepth(13).setAlpha(0);
+        .setDisplaySize(70, 70).setDepth(13).setAlpha(0);
     }
   }
 
@@ -518,12 +520,12 @@ export class PlayScene extends Phaser.Scene {
     // In 2P mode — both timed out
     if (this.gameMode !== 'flat') {
       if (!this.p1Answered) {
-        this.p1.lives = Math.max(0, this.p1.lives - 1);
-        this.events.emit('p1-lost-life', this.p1.lives);
+        this.p1.score = Math.max(0, this.p1.score - 5);
+        this.events.emit('p1-verdict', { correct: false, score: this.p1.score, streak: 0 });
       }
       if (!this.p2Answered) {
-        this.p2.lives = Math.max(0, this.p2.lives - 1);
-        this.events.emit('p2-lost-life', this.p2.lives);
+        this.p2.score = Math.max(0, this.p2.score - 5);
+        this.events.emit('p2-verdict', { correct: false, score: this.p2.score, streak: 0 });
       }
     }
 
@@ -732,8 +734,9 @@ export class PlayScene extends Phaser.Scene {
   _showBallGlow(x) {
     if (!this.ballGlow || !x) return;
     this.ballGlow.setPosition(x, HOOP_Y);
-    this.ballGlow.setAlpha(0.9);
-    this.tweens.add({ targets: this.ballGlow, alpha: 0, scale: 1.6, duration: 700, ease: 'Quad.easeOut' });
+    this.ballGlow.setAlpha(1);
+    this.ballGlow.setScale(1);
+    this.tweens.add({ targets: this.ballGlow, alpha: 0, scale: 2.2, duration: 800, ease: 'Cubic.easeOut' });
   }
 
   // ── Buffer ─────────────────────────────────────────────── //

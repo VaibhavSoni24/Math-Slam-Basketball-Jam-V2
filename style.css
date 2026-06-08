@@ -257,6 +257,16 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
   100%{opacity:0;transform:translate(-50%,-60%);}
 }
 
+/* Exit Match Button */
+.exit-game-btn {
+  position: fixed; bottom: 20px; left: 20px; z-index: 200;
+  background: rgba(255, 71, 87, 0.1); border: 2px solid rgba(255, 71, 87, 0.4);
+  color: #FF4757; font-family: var(--font-d); font-size: 16px; letter-spacing: 2px;
+  padding: 8px 16px; border-radius: var(--r-sm); cursor: pointer;
+  transition: all 0.2s; pointer-events: auto;
+}
+.exit-game-btn:hover { background: #FF4757; color: #fff; transform: scale(1.05); }
+
 /* ============================================================
    MENU SCREEN (3-COLUMN LAYOUT)
    ============================================================ */
@@ -285,9 +295,9 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
 .logo-tagline{font-size:13px;font-weight:600;font-style:italic;color:var(--txtd);margin-top:10px;letter-spacing:1px;}
 
 /* 3 Columns */
-.menu-cols{display:flex;gap:20px;align-items:stretch;}
+.menu-cols{display:flex;gap:30px;align-items:stretch;justify-content:center;}
 .menu-col{
-  flex:1;background:rgba(15,52,96,0.6);border:1px solid rgba(255,255,255,0.06);
+  flex:1; max-width: 320px; background:rgba(15,52,96,0.6);border:1px solid rgba(255,255,255,0.06);
   border-radius:var(--r-xl);padding:24px;backdrop-filter:blur(12px);
   box-shadow:0 12px 40px rgba(0,0,0,0.4);display:flex;flex-direction:column;
 }
@@ -319,10 +329,10 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
 .tc-desc{font-size:11px;color:var(--txtd);margin-top:6px;}
 
 /* Player Setup */
-.player-setup-card{flex-direction:row;align-items:center;gap:12px;cursor:default;margin-bottom:12px;padding:12px;}
+.player-setup-card{flex-direction:row;align-items:center;gap:16px;cursor:default;margin-bottom:12px;padding:16px;}
 .player-setup-card:hover{background:rgba(255,255,255,0.03);border-color:rgba(255,255,255,0.05);}
 .player-setup-card.hidden{display:none!important;}
-.ps-avatar{font-size:28px;background:rgba(255,255,255,0.05);width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;}
+.ps-avatar{font-size:28px;background:rgba(255,255,255,0.05);width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center;}
 .ps-fields{flex:1;display:flex;flex-direction:column;}
 .ps-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:var(--txtd);margin-bottom:4px;}
 .ps-input{background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:8px 10px;color:var(--txt);font-family:var(--font-b);font-size:14px;font-weight:600;outline:none;transition:border-color 0.2s;}

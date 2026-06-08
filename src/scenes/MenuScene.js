@@ -184,7 +184,7 @@ export class MenuScene extends Phaser.Scene {
 
             <!-- P1 -->
             <div class="player-setup-card p1-setup">
-              <div class="ps-avatar"><img src="assets/images/player_orange.png" style="width:160%; margin-top:-8px;" /></div>
+              <div class="ps-avatar"><img src="assets/images/player_orange.png" style="width:80%;" /></div>
               <div class="ps-fields">
                 <label class="ps-label p1-label">Player 1</label>
                 <input type="text" class="ps-input" id="p1-name-input"
@@ -195,7 +195,7 @@ export class MenuScene extends Phaser.Scene {
 
             <!-- P2 (only visible in 2P) -->
             <div class="player-setup-card p2-setup hidden" id="p2-setup-card">
-              <div class="ps-avatar"><img src="assets/images/player_blue.png" style="width:160%; margin-top:-8px; transform: scaleX(-1);" /></div>
+              <div class="ps-avatar"><img src="assets/images/player_blue.png" style="width:80%; transform: scaleX(-1);" /></div>
               <div class="ps-fields">
                 <label class="ps-label p2-label">Player 2</label>
                 <input type="text" class="ps-input" id="p2-name-input"

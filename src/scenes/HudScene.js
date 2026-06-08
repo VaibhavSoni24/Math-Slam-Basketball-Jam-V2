@@ -158,6 +158,9 @@ export class HudScene extends Phaser.Scene {
       <div class="possession-toast" id="possession-notice">
         <div class="possession-text" id="possession-text"></div>
       </div>
+      
+      <!-- EXIT GAME BUTTON -->
+      <button class="exit-game-btn" id="exit-game-btn">⬅ EXIT</button>
 
       <!-- HOT STREAK BANNER -->
       <div class="streak-banner" id="streak-banner"></div>
@@ -210,6 +213,15 @@ export class HudScene extends Phaser.Scene {
   }
 
   _wireInputs() {
+    const exitBtn = document.getElementById('exit-game-btn');
+    if (exitBtn) {
+      exitBtn.addEventListener('click', () => {
+        if (confirm('Are you sure you want to quit the match?')) {
+          this._goToMenu();
+        }
+      });
+    }
+
     const is2P = this.gameMode === 'local2p';
     const play = this.scene.get('PlayScene');
 
